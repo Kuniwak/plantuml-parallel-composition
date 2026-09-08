@@ -2,6 +2,7 @@ package promote
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -81,13 +82,31 @@ func mustParseTemplates(text string) *Templates {
 
 var defaultTemplates = mustParseTemplates("")
 
-// clause renders one clause. A template that fails to render leaves its own
-// error in the predicate, where a reader cannot miss it: a predicate is opaque
-// text, so there is nothing else to check it against.
-func (t *Templates) clause(name string, data clauseData) string {
+// renderer renders the clauses of one expansion, collecting the faults of a
+// template that parses but cannot run. Such a fault would otherwise end up
+// inside an opaque predicate, which nothing downstream can check.
+type renderer struct {
+	templates *Templates
+	diags     []Diagnostic
+}
+
+func newRenderer(templates *Templates) *renderer {
+	if templates == nil {
+		templates = defaultTemplates
+	}
+	return &renderer{templates: templates}
+}
+
+// clause renders one clause. A clause is used by many edges, so the same fault
+// is reported once.
+func (r *renderer) clause(name string, data clauseData) string {
 	var sb strings.Builder
-	if err := t.t.ExecuteTemplate(&sb, name, data); err != nil {
-		return fmt.Sprintf("<%s: %v>", name, err)
+	if err := r.templates.t.ExecuteTemplate(&sb, name, data); err != nil {
+		message := fmt.Sprintf("template %q cannot be rendered: %v", name, err)
+		if !slices.ContainsFunc(r.diags, func(diag Diagnostic) bool { return diag.Message == message }) {
+			r.diags = append(r.diags, Diagnostic{Severity: SeverityError, Message: message})
+		}
+		return ""
 	}
 	return sb.String()
 }

@@ -806,3 +806,41 @@ none --> open : tau
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestExpandReportsATemplateThatCannotRender(t *testing.T) {
+	// Arrange: a template that parses but cannot run would otherwise leave its
+	// own error inside an opaque predicate, where nothing downstream can catch
+	// it.
+	templates, err := promote.ParseTemplates(`{{define "at"}}{{.Nope.Missing}}{{end}}`)
+	if err != nil {
+		t.Fatalf("ParseTemplates() = _, %v; want no error", err)
+	}
+
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+open --> open : TOUCH
+@enduml
+`})
+
+	// Act
+	_, diags := promote.Expand(global, load, promote.Options{Templates: templates})
+
+	// Assert: the same broken clause is used by every edge, but it is one fault.
+	errs := promote.Errors(diags)
+	if len(errs) != 1 {
+		t.Fatalf("Expand() reported %d errors, want 1: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, `template "at"`) {
+		t.Errorf("Expand() error = %q; want it to name the clause", errs[0].Message)
+	}
+}

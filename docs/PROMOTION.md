@@ -191,7 +191,9 @@ Generated phrases
 The phrases the expansion generates (`id ∈ dom m`, `m(id) ∈ 〈S〉`, `m' = m ⊕ …`, the
 frame) are symbolic by default so that they belong to no natural language. `-template`
 replaces them clause by clause with a Go `text/template` file; a clause the file does
-not redefine keeps its symbolic form. The clauses are `exists`, `absent`, `at`,
+not redefine keeps its symbolic form. A clause that parses but cannot be rendered — a
+field that does not exist, say — is an error, not a phrase: a fault buried in an opaque
+predicate is one nothing downstream can catch. The clauses are `exists`, `absent`, `at`,
 `insert`, `update`, `delete`, `keep` and `unchanged`, and each is given `.Map`, `.ID`,
 `.Src`, `.Dst`, `.Guard`, `.Post`, `.Other` and `.OtherMaps`. A Japanese version ships
 as `examples/promote/templates/ja.tmpl`.
@@ -218,6 +220,7 @@ checks without printing.
 | error    | a map is synced with itself                                                            |
 | error    | `tau` is synced                                                                        |
 | error    | no expanded edge matches a `constrain` in event name and number of arguments           |
+| error    | a clause template cannot be rendered                                                   |
 | warning  | an event is in two local diagrams and is not synced                                    |
 | warning  | the promoted type does not appear in the type of the map                               |
 | warning  | a deletion edge has a local post, which is discarded                                   |
