@@ -181,8 +181,14 @@ the value the shared event carries. Two arguments that happen to share a name an
 different things would be merged wrongly, so name them apart.
 
 An event synced through a map is not expanded independently for that map. An event that
-appears in two local diagrams and is *not* synced is a warning: taking it independently
+appears in two local diagrams and is *not* synced is a warning, and so is one that is
+synced for some of the maps that have it but not for all: taking an event independently
 is legitimate but is more often an oversight.
+
+One event takes one `sync` directive. A second directive for the same event would emit
+the merged edges twice, and each would keep the other's maps from expanding on their
+own, so it is an error. A directive that names a single map is a warning: it is what
+promoting that map alone already does.
 
 
 Generated phrases
@@ -219,9 +225,11 @@ checks without printing.
 | error    | the promotions of the synced maps share no state                                       |
 | error    | a map is synced with itself                                                            |
 | error    | `tau` is synced                                                                        |
+| error    | two `sync` directives name the same event                                              |
 | error    | no expanded edge matches a `constrain` in event name and number of arguments           |
 | error    | a clause template cannot be rendered                                                   |
-| warning  | an event is in two local diagrams and is not synced                                    |
+| warning  | an event is in two local diagrams and is not synced, or is synced for only some of them |
+| warning  | a `sync` directive names a single map                                                  |
 | warning  | the promoted type does not appear in the type of the map                               |
 | warning  | a deletion edge has a local post, which is discarded                                   |
 | warning  | a `constrain` guard mentions none of its parameters                                    |

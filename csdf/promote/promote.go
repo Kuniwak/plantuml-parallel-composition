@@ -165,7 +165,28 @@ func Expand(global *csdf.Diagram, load csdf.DiagramLoader, opts Options) (*Resul
 	// A synced event is not the business of any one map, so it is left out of
 	// the independent expansions and merged afterwards.
 	synced := make(map[csdf.Var]map[string]bool)
+	syncedAt := make(map[string]int, len(global.Syncs))
 	for _, sync := range global.Syncs {
+		if line, ok := syncedAt[sync.Event]; ok {
+			// Each directive would emit the merged edges, and each would keep
+			// the other's maps from expanding on their own.
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     sync.Line,
+				Message:  fmt.Sprintf("sync %s: the event is already synced at line %d", sync.Event, line),
+			})
+			continue
+		}
+		syncedAt[sync.Event] = sync.Line
+
+		if len(sync.Targets) == 1 {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Line:     sync.Line,
+				Message:  fmt.Sprintf("sync %s: only one map is synced, which is what promoting it alone already does", sync.Event),
+			})
+		}
+
 		syncEdges, syncDiags := expandSync(global, sync, promotions, render)
 		diags = append(diags, syncDiags...)
 		edges = append(edges, syncEdges...)
@@ -192,7 +213,7 @@ func Expand(global *csdf.Diagram, load csdf.DiagramLoader, opts Options) (*Resul
 	}
 
 	diags = append(diags, render.diags...)
-	diags = append(diags, checkSharedEvents(global, promotions, order)...)
+	diags = append(diags, checkSharedEvents(promotions, order, synced)...)
 
 	for _, constrain := range global.Constrains {
 		diags = append(diags, applyConstrain(constrain, edges)...)
@@ -706,14 +727,9 @@ func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnost
 // checkSharedEvents reads back the local event names that appear in more than
 // one local diagram without a sync directive. Sharing a name and yet taking the
 // event independently is legitimate, but it is more often an oversight.
-func checkSharedEvents(global *csdf.Diagram, promotions map[csdf.Var]*resolvedPromote, order []csdf.Var) []Diagnostic {
-	synced := make(map[string]bool, len(global.Syncs))
-	for _, sync := range global.Syncs {
-		synced[sync.Event] = true
-	}
-
+func checkSharedEvents(promotions map[csdf.Var]*resolvedPromote, order []csdf.Var, synced map[csdf.Var]map[string]bool) []Diagnostic {
 	var events []string
-	paths := make(map[string][]string)
+	holders := make(map[string][]csdf.Var)
 	for _, name := range order {
 		promotion := promotions[name]
 		seen := make(map[string]bool)
@@ -723,27 +739,55 @@ func checkSharedEvents(global *csdf.Diagram, promotions map[csdf.Var]*resolvedPr
 				continue
 			}
 			seen[eventName] = true
-			if len(paths[eventName]) == 0 {
+			if len(holders[eventName]) == 0 {
 				events = append(events, eventName)
 			}
-			paths[eventName] = append(paths[eventName], promotion.Promote.Path)
+			holders[eventName] = append(holders[eventName], name)
 		}
 	}
 	slices.Sort(events)
 
 	var diags []Diagnostic
 	for _, event := range events {
-		if synced[event] || len(paths[event]) < 2 {
+		if len(holders[event]) < 2 {
 			continue
 		}
-		diags = append(diags, Diagnostic{
-			Severity: SeverityWarning,
-			Message: fmt.Sprintf(
-				"the event %s is in %s but is not synced; the instances take it independently",
-				event, joinAnd(paths[event])),
-		})
+
+		var loose []string
+		for _, name := range holders[event] {
+			if !synced[name][event] {
+				loose = append(loose, promotions[name].Promote.Path)
+			}
+		}
+
+		switch len(loose) {
+		case 0:
+			// Every instance that has the event takes it together.
+		case len(holders[event]):
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Message: fmt.Sprintf(
+					"the event %s is in %s but is not synced; the instances take it independently",
+					event, joinAnd(loose)),
+			})
+		default:
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Message: fmt.Sprintf(
+					"the event %s is synced, but %s also %s it and %s not in the sync; %s takes it independently",
+					event, joinAnd(loose), plural(len(loose), "has", "have"),
+					plural(len(loose), "is", "are"), plural(len(loose), "that instance", "those instances")),
+			})
+		}
 	}
 	return diags
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func joinAnd(items []string) string {

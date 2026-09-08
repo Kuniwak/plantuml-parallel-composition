@@ -21,6 +21,16 @@ func mustParseGlobal(source string) *csdf.Diagram {
 	return diagram
 }
 
+// twoStateLocal is the smallest local diagram that has an event: one instance
+// is created by E and goes nowhere else.
+const twoStateLocal = `@startuml
+state "なし" as none
+state "あり" as one
+[*] --> none
+none --> one : E
+@enduml
+`
+
 // stubLoader answers with the diagrams it was built from, and reports every
 // other path as missing, the way the file system would.
 func stubLoader(sources map[string]string) csdf.DiagramLoader {
@@ -853,5 +863,80 @@ open --> open : TOUCH
 	}
 	if !strings.Contains(errs[0].Message, `template "at"`) {
 		t.Errorf("Expand() error = %q; want it to name the clause", errs[0].Message)
+	}
+}
+
+func TestExpandRefusesTwoSyncsOfOneEvent(t *testing.T) {
+	// Arrange: two directives for one event would each emit the merged edges,
+	// and each would suppress the independent expansion of the other's maps.
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : xs
+running : ys
+[*] --> running
+promote local/X.puml as X via xs(x)
+promote local/Y.puml as Y via ys(y)
+sync E : xs(x), ys(y)
+sync E : xs(x), ys(y)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal, "local/Y.puml": twoStateLocal})
+
+	want := []string{"sync E: the event is already synced at line 8"}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandWarnsAboutASyncOfOneMap(t *testing.T) {
+	// Arrange: synchronising one instance with nobody is what a plain promotion
+	// already does, so the author has most likely dropped the other map.
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : xs
+[*] --> running
+promote local/X.puml as X via xs(x)
+sync E : xs(x)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal})
+
+	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+	want := []string{"sync E: only one map is synced, which is what promoting it alone already does"}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandWarnsAboutAPartiallySyncedEvent(t *testing.T) {
+	// Arrange: E is synced for two of the three maps that have it, so the third
+	// instance takes it on its own. That is legitimate, and it is also what a
+	// forgotten map looks like.
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : xs
+running : ys
+running : zs
+[*] --> running
+promote local/X.puml as X via xs(x)
+promote local/Y.puml as Y via ys(y)
+promote local/Z.puml as Z via zs(z)
+sync E : xs(x), ys(y)
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/X.puml": twoStateLocal,
+		"local/Y.puml": twoStateLocal,
+		"local/Z.puml": twoStateLocal,
+	})
+
+	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+	want := []string{"the event E is synced, but local/Z.puml also has it and is not in the sync; that instance takes it independently"}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
 	}
 }
