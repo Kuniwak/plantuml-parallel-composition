@@ -260,3 +260,47 @@ state "稼働中" as running {
 		})
 	}
 }
+
+func TestLoadGlobalReadsTheWorkedExamples(t *testing.T) {
+	cases := map[string]struct {
+		path string
+		want []promote.Promote
+	}{
+		"one map in one mode": {
+			path: "../../examples/promote/ACCOUNTS.puml",
+			want: []promote.Promote{{
+				Map: "accounts", IDParam: "口座ID", Type: "Account",
+				Path: "local/ACCOUNT.puml", Alias: "runningAccounts", In: "running", Line: 8,
+			}},
+		},
+		"two maps and two modes": {
+			path: "../../examples/promote/MODES.puml",
+			want: []promote.Promote{
+				{
+					Map: "accounts", IDParam: "口座ID", Type: "Account",
+					Path: "local/ACCOUNT.puml", Alias: "runningAccounts", In: "running", Line: 18,
+				},
+				{
+					Map: "audits", IDParam: "監査ID", Type: "Audit",
+					Path: "local/AUDIT.puml", Alias: "runningAudits", In: "running", Line: 21,
+				},
+				{
+					Map: "accounts", IDParam: "口座ID", Type: "Account",
+					Alias: "degradedAccounts", In: "degraded", Line: 30,
+				},
+			},
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			g, err := promote.LoadGlobal(c.path)
+			if err != nil {
+				t.Fatalf("promote.LoadGlobal(%q) error = %v", c.path, err)
+			}
+			if diff := cmp.Diff(c.want, g.Promotes); diff != "" {
+				t.Errorf("promote.LoadGlobal(%q) promotes mismatch (-want +got):\n%s", c.path, diff)
+			}
+		})
+	}
+}

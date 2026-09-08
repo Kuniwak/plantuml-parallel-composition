@@ -2,10 +2,12 @@ package promote
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"github.com/Kuniwak/puml-parallel/csdf"
+	"github.com/Kuniwak/puml-parallel/pngsrc"
 )
 
 // The directives are all line-shaped, and so is PlantUML's own syntax for them,
@@ -304,4 +306,28 @@ func splitTrimmed(s string) []string {
 		}
 	}
 	return out
+}
+
+// ParseGlobalBytes reads a global diagram from raw .puml text or .png bytes
+// (the embedded PlantUML source is extracted from PNG inputs).
+func ParseGlobalBytes(content []byte) (*GlobalDiagram, error) {
+	source, err := pngsrc.Extract(content)
+	if err != nil {
+		return nil, fmt.Errorf("promote.ParseGlobalBytes: reading PlantUML source: %w", err)
+	}
+	return ParseGlobal(source)
+}
+
+// LoadGlobal reads and parses the global diagram stored at path.
+func LoadGlobal(path string) (*GlobalDiagram, error) {
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("promote.LoadGlobal: cannot read file: %w: %q", err, path)
+	}
+
+	g, err := ParseGlobalBytes(bs)
+	if err != nil {
+		return nil, fmt.Errorf("promote.LoadGlobal: cannot parse file %q: %w", path, err)
+	}
+	return g, nil
 }
