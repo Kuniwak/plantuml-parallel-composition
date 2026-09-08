@@ -15,7 +15,7 @@ func (e *expander) check() {
 	e.checkBlocks()
 	e.loadLocals()
 	e.checkLocals()
-	if hasError(e.diags) {
+	if HasError(e.diags) {
 		// The syncs are read against the local diagrams, which are not all
 		// there when a block is in error.
 		return
@@ -148,9 +148,21 @@ func (e *expander) errorf(line int, format string, args ...any) {
 	e.diags = append(e.diags, Diagnostic{Severity: SeverityError, Line: line, Message: fmt.Sprintf(format, args...)})
 }
 
-// hasError reports whether any diagnostic leaves the diagram unprintable.
-func hasError(diags []Diagnostic) bool {
-	return slices.ContainsFunc(diags, func(d Diagnostic) bool { return d.Severity == SeverityError })
+// HasError reports whether any diagnostic leaves the diagram unprintable.
+func HasError(diags []Diagnostic) bool { return HasSeverity(diags, SeverityError) }
+
+// HasSeverity reports whether any diagnostic is of that severity. -Werror is a
+// policy over this, not over the printing.
+func HasSeverity(diags []Diagnostic, s Severity) bool {
+	return slices.ContainsFunc(diags, func(d Diagnostic) bool { return d.Severity == s })
+}
+
+// sorted returns the diagnostics by source line, so that reading them follows
+// reading the file. The checks run in an order of their own, and one of them
+// ranges over a map.
+func (e *expander) sorted() []Diagnostic {
+	slices.SortStableFunc(e.diags, func(a, b Diagnostic) int { return a.Line - b.Line })
+	return e.diags
 }
 
 // warn reports what is probably not meant. None of it stops the expansion: the

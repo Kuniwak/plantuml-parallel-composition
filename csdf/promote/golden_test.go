@@ -37,14 +37,9 @@ func TestExpandMatchesTheRecordedExpansions(t *testing.T) {
 				t.Fatalf("promote.LoadGlobal(%q) error = %v", path, err)
 			}
 
-			x, diags, err := promote.Expand(g, promote.FileLoader(filepath.Dir(path)))
-			if err != nil {
-				t.Fatalf("promote.Expand(%q) error = %v", path, err)
-			}
-			for _, d := range diags {
-				if d.Severity == promote.SeverityError {
-					t.Fatalf("promote.Expand(%q) diagnostic = %v", path, d)
-				}
+			x, diags := promote.Expand(g, promote.FileLoader(filepath.Dir(path)), promote.DefaultTemplates())
+			if promote.HasError(diags) {
+				t.Fatalf("promote.Expand(%q) diagnostics = %v", path, diags)
 			}
 
 			golden := strings.TrimSuffix(path, ".puml") + ".expanded.puml"

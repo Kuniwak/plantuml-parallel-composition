@@ -3,8 +3,6 @@ package promote_test
 import (
 	"strings"
 	"testing"
-
-	"github.com/Kuniwak/puml-parallel/csdf/promote"
 )
 
 func TestExpandWarnsAboutWhatIsProbablyNotMeant(t *testing.T) {
@@ -78,15 +76,7 @@ running --> maintenance : MAINT ; true ; buys' = buys ∧ cycles' = cycles
 				locals = syncLocals
 			}
 
-			g, err := promote.ParseGlobal(c.global)
-			if err != nil {
-				t.Fatalf("promote.ParseGlobal() error = %v", err)
-			}
-
-			x, diags, err := promote.Expand(g, loaderOf(locals))
-			if err != nil {
-				t.Fatalf("promote.Expand() error = %v", err)
-			}
+			x, diags := expand(t, c.global, locals)
 			if x == nil {
 				t.Fatalf("promote.Expand() expansion = nil; a warning must not stop it: %v", diags)
 			}

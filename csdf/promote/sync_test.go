@@ -3,9 +3,6 @@ package promote_test
 import (
 	"strings"
 	"testing"
-
-	"github.com/Kuniwak/puml-parallel/csdf/promote"
-	"github.com/google/go-cmp/cmp"
 )
 
 // The two families take BOOK together: booking a buy trade is the same event as
@@ -56,15 +53,7 @@ end note
 `
 
 func TestExpandMergesTheSyncedEdges(t *testing.T) {
-	g, err := promote.ParseGlobal(syncGlobal)
-	if err != nil {
-		t.Fatalf("promote.ParseGlobal() error = %v", err)
-	}
-
-	x, diags, err := promote.Expand(g, loaderOf(syncLocals))
-	if err != nil {
-		t.Fatalf("promote.Expand() error = %v", err)
-	}
+	x, diags := expand(t, syncGlobal, syncLocals)
 	if x == nil {
 		t.Fatalf("promote.Expand() expansion = nil, diagnostics = %v", diags)
 	}
@@ -88,15 +77,7 @@ func TestExpandMergesTheSyncedEdges(t *testing.T) {
 }
 
 func TestExpandPromotesTauWithoutAnInstanceID(t *testing.T) {
-	g, err := promote.ParseGlobal(syncGlobal)
-	if err != nil {
-		t.Fatalf("promote.ParseGlobal() error = %v", err)
-	}
-
-	x, _, err := promote.Expand(g, loaderOf(syncLocals))
-	if err != nil {
-		t.Fatalf("promote.Expand() error = %v", err)
-	}
+	x, _ := expand(t, syncGlobal, syncLocals)
 
 	want := "running --> running : tau ; 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈集計中〉 ; cycles' = cycles ⊕ {基準日 ↦ 〈確定済み〉} ∧ buys' = buys"
 	if got := x.String(); !strings.Contains(got, want) {
@@ -114,15 +95,7 @@ note as cons2
 end note
 @enduml`, 1)
 
-	g, err := promote.ParseGlobal(source)
-	if err != nil {
-		t.Fatalf("promote.ParseGlobal() error = %v", err)
-	}
-
-	x, diags, err := promote.Expand(g, loaderOf(syncLocals))
-	if err != nil {
-		t.Fatalf("promote.Expand() error = %v", err)
-	}
+	x, diags := expand(t, source, syncLocals)
 	if x == nil {
 		t.Fatalf("promote.Expand() expansion = nil, diagnostics = %v", diags)
 	}
@@ -164,15 +137,7 @@ end note
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			g, err := promote.ParseGlobal(c.global)
-			if err != nil {
-				t.Fatalf("promote.ParseGlobal() error = %v", err)
-			}
-
-			x, diags, err := promote.Expand(g, loaderOf(syncLocals))
-			if err != nil {
-				t.Fatalf("promote.Expand() error = %v", err)
-			}
+			x, diags := expand(t, c.global, syncLocals)
 			if x != nil {
 				t.Errorf("promote.Expand() expansion = %q, want none", x.String())
 			}
@@ -182,5 +147,3 @@ end note
 		})
 	}
 }
-
-var _ = cmp.Diff

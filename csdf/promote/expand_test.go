@@ -1,28 +1,27 @@
 package promote_test
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/Kuniwak/puml-parallel/csdf"
 	"github.com/Kuniwak/puml-parallel/csdf/promote"
 	"github.com/google/go-cmp/cmp"
 )
 
-// loaderOf resolves !include paths from an in-memory table, so an expansion test
-// says what the local diagram is next to what it expands into.
-func loaderOf(locals map[string]string) promote.LoadFunc {
-	return func(path string) (*csdf.Diagram, error) {
-		source, ok := locals[path]
-		if !ok {
-			return nil, fmt.Errorf("no such file: %q", path)
-		}
-		return csdf.Parse(source)
+// expand parses a global diagram and expands it against in-memory local
+// diagrams, so that a test says what the local diagram is next to what it
+// expands into.
+func expand(t *testing.T, global string, locals map[string]string) (*promote.Expansion, []promote.Diagnostic) {
+	t.Helper()
+
+	g, err := promote.ParseGlobal(global)
+	if err != nil {
+		t.Fatalf("promote.ParseGlobal() error = %v", err)
 	}
+	return promote.Expand(g, promote.MapLoader(locals), promote.DefaultTemplates())
 }
 
 func TestExpandOneMapWithNoStateVariables(t *testing.T) {
-	g, err := promote.ParseGlobal(`@startuml ACCOUNTS
+	got, diags := expand(t, `@startuml ACCOUNTS
 state "稼働中" as running {
   running : accounts ; 口座ID ⇸ Account
 
@@ -33,12 +32,7 @@ state "稼働中" as running {
 
 [*] --> running : accounts は空
 @enduml
-`)
-	if err != nil {
-		t.Fatalf("promote.ParseGlobal() error = %v", err)
-	}
-
-	load := loaderOf(map[string]string{
+`, map[string]string{
 		"local/ACCOUNT.puml": `@startuml ACCOUNT
 state "未開設" as accNone
 state "開設済み" as accOpen
@@ -49,10 +43,6 @@ accOpen --> accNone : CLOSE
 `,
 	})
 
-	got, diags, err := promote.Expand(g, load)
-	if err != nil {
-		t.Fatalf("promote.Expand() error = %v", err)
-	}
 	if len(diags) != 0 {
 		t.Errorf("promote.Expand() diagnostics = %v, want none", diags)
 	}

@@ -51,15 +51,18 @@ func (d Diagnostic) String() string {
 
 // Expansion is the expanded diagram together with the origin of every edge the
 // expansion generated.
-//
-// It prints itself rather than leaving that to csdf.Diagram, because the origin
-// comments have to sit between the edges and the core printer has nowhere to put
-// them. The core grammar and its printer are deliberately left alone.
 type Expansion struct {
 	Diagram *csdf.Diagram `json:"diagram"`
-	// Origins is aligned with Diagram.Edges: the comment to print above each
-	// edge, empty for an edge the author wrote by hand.
-	Origins []string `json:"origins"`
+	// Edges is Diagram.Edges again, each with where it came from. The two are
+	// kept in step by sortEdges, which is the only thing that reorders them.
+	Edges []ExpandedEdge `json:"edges"`
+}
+
+// ExpandedEdge is one edge of the expansion and the local edge it came from.
+// Origin is empty for an edge the author wrote by hand.
+type ExpandedEdge struct {
+	Edge   csdf.Edge `json:"edge"`
+	Origin string    `json:"origin,omitempty"`
 }
 
 // eventRe splits a local event into its name and its argument list. An event is
@@ -67,26 +70,19 @@ type Expansion struct {
 // this shape is promoted by appending the instance ID as the only argument.
 var eventRe = regexp.MustCompile(`^([^()]+?)\s*\(\s*(.*?)\s*\)$`)
 
-// Option changes how an expansion is worded.
-type Option func(*expander)
-
-// WithTemplates replaces the wording of the generated clauses.
-func WithTemplates(t *Templates) Option {
-	return func(e *expander) { e.templates = t }
-}
-
 // Expand turns every promotion into edges on the state its block was written in.
-func Expand(g *GlobalDiagram, load LoadFunc, opts ...Option) (*Expansion, []Diagnostic, error) {
+//
+// The wording of the generated clauses is templates; pass DefaultTemplates for
+// the symbolic one. It returns no expansion when a diagnostic is an error: an
+// unsound expansion must not reach the tools downstream.
+func Expand(g *GlobalDiagram, load LoadFunc, templates *Templates) (*Expansion, []Diagnostic) {
 	e := &expander{
 		global:    g,
 		load:      load,
-		templates: DefaultTemplates(),
+		templates: templates,
 		locals:    map[csdf.Var]*csdf.Diagram{},
 		paths:     map[csdf.Var]string{},
 		owned:     map[ownership]bool{},
-	}
-	for _, opt := range opts {
-		opt(e)
 	}
 	return e.run()
 }
@@ -110,39 +106,37 @@ type expander struct {
 	diags []Diagnostic
 }
 
-func (e *expander) run() (*Expansion, []Diagnostic, error) {
+func (e *expander) run() (*Expansion, []Diagnostic) {
 	e.check()
-	if hasError(e.diags) {
-		return nil, e.diags, nil
+	if HasError(e.diags) {
+		return nil, e.sorted()
 	}
 
 	out := e.global.Core.Clone()
-	origins := make([]string, len(out.Edges))
+	edges := make([]ExpandedEdge, 0, len(out.Edges))
+	for _, edge := range out.Edges {
+		edges = append(edges, ExpandedEdge{Edge: edge})
+	}
 
 	for _, p := range e.global.Promotes {
-		local := e.locals[p.Map]
-		if local == nil {
-			continue
-		}
-		for _, edge := range local.Edges {
+		for _, edge := range e.locals[p.Map].Edges {
 			if name, _ := splitEvent(edge.Event); e.owned[ownership{p.In, p.Map, name}] {
 				continue
 			}
 			expanded, origin := e.promoteEdge(p, edge)
-			out.Edges = append(out.Edges, expanded)
-			origins = append(origins, origin)
+			edges = append(edges, ExpandedEdge{Edge: expanded, Origin: origin})
 		}
 	}
 
-	e.mergeSyncs(out, &origins)
-	e.constrain(out, origins)
-	if hasError(e.diags) {
-		return nil, e.diags, nil
+	edges = e.mergeSyncs(edges)
+	e.constrain(edges)
+	if HasError(e.diags) {
+		return nil, e.sorted()
 	}
 
-	x := &Expansion{Diagram: out, Origins: origins}
+	x := &Expansion{Diagram: out, Edges: edges}
 	x.sortEdges()
-	return x, e.diags, nil
+	return x, e.sorted()
 }
 
 // edgeParts is one local edge promoted through one map: the clauses it
@@ -275,22 +269,26 @@ func (e *expander) frame(g csdf.StateID, moved []csdf.Var) []string {
 // sortEdges puts the edges in the canonical order, carrying each origin comment
 // along with the edge it belongs to.
 func (x *Expansion) sortEdges() {
-	order := make([]int, len(x.Diagram.Edges))
-	for i := range order {
-		order[i] = i
-	}
-	slices.SortStableFunc(order, func(a, b int) int {
-		return csdf.CompareEdge(x.Diagram.Edges[a], x.Diagram.Edges[b])
+	slices.SortStableFunc(x.Edges, func(a, b ExpandedEdge) int {
+		return csdf.CompareEdge(a.Edge, b.Edge)
 	})
 
-	edges := make([]csdf.Edge, len(order))
-	origins := make([]string, len(order))
-	for i, from := range order {
-		edges[i] = x.Diagram.Edges[from]
-		origins[i] = x.Origins[from]
+	x.Diagram.Edges = make([]csdf.Edge, len(x.Edges))
+	for i, edge := range x.Edges {
+		x.Diagram.Edges[i] = edge.Edge
 	}
-	x.Diagram.Edges = edges
-	x.Origins = origins
+}
+
+// MapLoader resolves !include paths from an in-memory table of sources, which is
+// what a test - or anything holding the local diagrams already - wants.
+func MapLoader(sources map[string]string) LoadFunc {
+	return func(path string) (*csdf.Diagram, error) {
+		source, ok := sources[path]
+		if !ok {
+			return nil, fmt.Errorf("no such file: %q", path)
+		}
+		return csdf.Parse(source)
+	}
 }
 
 // FileLoader resolves !include paths against base, the directory the global

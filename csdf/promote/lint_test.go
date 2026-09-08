@@ -218,15 +218,7 @@ accNone --> audOpen : AUDIT-BEGIN
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			g, err := promote.ParseGlobal(c.global)
-			if err != nil {
-				t.Fatalf("promote.ParseGlobal() error = %v", err)
-			}
-
-			x, diags, err := promote.Expand(g, loaderOf(c.locals))
-			if err != nil {
-				t.Fatalf("promote.Expand() error = %v", err)
-			}
+			x, diags := expand(t, c.global, c.locals)
 			if x != nil {
 				t.Errorf("promote.Expand() expansion = %q, want none", x.String())
 			}

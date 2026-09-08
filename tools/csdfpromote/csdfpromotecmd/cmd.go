@@ -32,31 +32,25 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return nil
 		}
 
-		var expandOpts []promote.Option
+		templates := promote.DefaultTemplates()
 		if opts.Template != "" {
-			templates, err := promote.LoadTemplates(opts.Template)
+			loaded, err := promote.LoadTemplates(opts.Template)
 			if err != nil {
 				return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 			}
-			expandOpts = append(expandOpts, promote.WithTemplates(templates))
+			templates = loaded
 		}
 
-		expansion, diags, err := promote.Expand(global, promote.FileLoader(opts.Base), expandOpts...)
-		if err != nil {
-			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
-		}
-
-		warned := false
+		expansion, diags := promote.Expand(global, promote.FileLoader(opts.Base), templates)
 		for _, d := range diags {
 			fmt.Fprintln(inout.Stderr, d)
-			warned = warned || d.Severity == promote.SeverityWarning
 		}
 		// An error leaves the diagram unprinted, so an unsound expansion never
 		// reaches the tools downstream.
-		if expansion == nil {
+		if promote.HasError(diags) {
 			return fmt.Errorf("the promotion has errors")
 		}
-		if warned && opts.Werror {
+		if opts.Werror && promote.HasSeverity(diags, promote.SeverityWarning) {
 			return fmt.Errorf("the promotion has warnings and -Werror is set")
 		}
 		if opts.LintOnly {

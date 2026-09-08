@@ -87,7 +87,7 @@ type ownership struct {
 // mergeSyncs emits one edge per combination of the local edges its maps
 // contribute: a guard on one side can pick out any state on the other, so the
 // product is what the two families can do together.
-func (e *expander) mergeSyncs(out *csdf.Diagram, origins *[]string) {
+func (e *expander) mergeSyncs(edges []ExpandedEdge) []ExpandedEdge {
 	for _, plan := range e.plans {
 		for _, g := range plan.states {
 			blocks := plan.blocks[g]
@@ -104,11 +104,14 @@ func (e *expander) mergeSyncs(out *csdf.Diagram, origins *[]string) {
 					parts[i] = e.parts(blocks[i], edge, plan.sync.Targets[i].Param)
 					moved[i] = blocks[i].Map
 				}
-				out.Edges = append(out.Edges, e.compose(g, parts, moved...))
-				*origins = append(*origins, e.syncOrigin(plan, blocks, parts))
+				edges = append(edges, ExpandedEdge{
+					Edge:   e.compose(g, parts, moved...),
+					Origin: e.syncOrigin(plan, blocks, parts),
+				})
 			}
 		}
 	}
+	return edges
 }
 
 func (e *expander) syncOrigin(plan syncPlan, blocks []Promote, parts []edgeParts) string {
@@ -122,25 +125,25 @@ func (e *expander) syncOrigin(plan syncPlan, blocks []Promote, parts []edgeParts
 // constrain conjoins each constrain guard onto every generated edge that matches
 // the event in name and arity. A hand-written edge is left alone: it already
 // says everything it was meant to.
-func (e *expander) constrain(out *csdf.Diagram, origins []string) {
+func (e *expander) constrain(edges []ExpandedEdge) {
 	for _, c := range e.global.Constrains {
 		matched := 0
-		for i := range out.Edges {
-			if origins[i] == "" {
+		for i := range edges {
+			if edges[i].Origin == "" {
 				continue
 			}
-			name, args := splitEvent(out.Edges[i].Event)
+			name, args := splitEvent(edges[i].Edge.Event)
 			if name != c.Event || len(args) != len(c.Params) {
 				continue
 			}
 			matched++
 
-			guard := out.Edges[i].Guard
+			guard := edges[i].Edge.Guard
 			if csdf.IsTrue(guard) {
-				out.Edges[i].Guard = c.Guard
+				edges[i].Edge.Guard = c.Guard
 				continue
 			}
-			out.Edges[i].Guard = csdf.Predicate(e.templates.join([]string{string(guard), string(c.Guard)}))
+			edges[i].Edge.Guard = csdf.Predicate(e.templates.join([]string{string(guard), string(c.Guard)}))
 		}
 		if matched == 0 {
 			e.errorf(c.Line, "no expanded edge is %q with %d argument%s", c.Event, len(c.Params), plural(len(c.Params)))
@@ -171,9 +174,6 @@ func (e *expander) blockOf(m csdf.Var, g csdf.StateID) Promote {
 
 // edgesOn returns the local edges carrying the named event, in source order.
 func edgesOn(local *csdf.Diagram, event string) []csdf.Edge {
-	if local == nil {
-		return nil
-	}
 	var edges []csdf.Edge
 	for _, edge := range local.Edges {
 		if name, _ := splitEvent(edge.Event); name == event {
