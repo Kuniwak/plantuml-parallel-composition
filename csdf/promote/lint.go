@@ -3,6 +3,7 @@ package promote
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/Kuniwak/puml-parallel/csdf"
 )
@@ -20,6 +21,7 @@ func (e *expander) check() {
 		return
 	}
 	e.planSyncs()
+	e.warn()
 }
 
 // checkBlocks reads the <<promote>> blocks against each other and against the
@@ -34,6 +36,10 @@ func (e *expander) checkBlocks() {
 			e.errorf(p.Line, "the <<promote>> block of %q is not inside a state; write the state it moves in as a composite state around it", p.Map)
 		} else if !holdsVar(e.global.Core.States[p.In], p.Map) {
 			e.errorf(p.Line, "state %q holds no state variable named %q", p.In, p.Map)
+		}
+
+		if v, ok := varOf(e.global.Core.States[p.In], p.Map); ok && !strings.Contains(v.Type, p.Type) {
+			e.warnf(p.Line, "%q is promoted as %q but its state variable is written %q", p.Map, p.Type, v.Type)
 		}
 
 		key := [2]string{string(p.In), string(p.Map)}
@@ -126,7 +132,16 @@ func (e *expander) checkLocals() {
 }
 
 func holdsVar(s csdf.State, name csdf.Var) bool {
-	return slices.ContainsFunc(s.Vars, func(v csdf.StateVar) bool { return v.Name == name })
+	_, ok := varOf(s, name)
+	return ok
+}
+
+func varOf(s csdf.State, name csdf.Var) (csdf.StateVar, bool) {
+	i := slices.IndexFunc(s.Vars, func(v csdf.StateVar) bool { return v.Name == name })
+	if i < 0 {
+		return csdf.StateVar{}, false
+	}
+	return s.Vars[i], true
 }
 
 func (e *expander) errorf(line int, format string, args ...any) {
@@ -136,4 +151,137 @@ func (e *expander) errorf(line int, format string, args ...any) {
 // hasError reports whether any diagnostic leaves the diagram unprintable.
 func hasError(diags []Diagnostic) bool {
 	return slices.ContainsFunc(diags, func(d Diagnostic) bool { return d.Severity == SeverityError })
+}
+
+// warn reports what is probably not meant. None of it stops the expansion: the
+// diagram it produces is well formed, just unlikely to be what the author had
+// in mind.
+func (e *expander) warn() {
+	e.warnAboutLocals()
+	e.warnAboutSharedEvents()
+	e.warnAboutNotes()
+	e.warnAboutFrozenMaps()
+}
+
+// warnAboutLocals reports the posts the expansion throws away.
+func (e *expander) warnAboutLocals() {
+	for _, p := range e.order {
+		local := e.locals[p.Map]
+		absent := local.StartEdge.Dst
+
+		if !csdf.IsTrue(local.StartEdge.Post) {
+			e.warnf(p.Line, "the start edge of %s has a post, which says nothing: its state means that the instance does not exist. Leave it out", p.Path)
+		}
+		for _, edge := range local.Edges {
+			if edge.Dst == absent && !csdf.IsTrue(edge.Post) {
+				e.warnf(p.Line, "the post of %s in %s is dropped: the edge deletes the instance it would be about. Write an effect on another map as a sync or a hand-written edge", edge.Event, p.Path)
+			}
+		}
+	}
+}
+
+// warnAboutSharedEvents reports an event two families have without a sync. Two
+// families that name an event the same way usually mean to take it together;
+// without a sync they take it one at a time.
+func (e *expander) warnAboutSharedEvents() {
+	synced := map[string]bool{}
+	for _, s := range e.global.Syncs {
+		synced[s.Event] = true
+	}
+
+	seen := map[string]Promote{}
+	for _, p := range e.order {
+		for _, event := range eventsOf(e.locals[p.Map]) {
+			if synced[event] {
+				continue
+			}
+			if prev, ok := seen[event]; ok && prev.Map != p.Map {
+				e.warnf(0, "%s and %s both have an edge on %q, which is not synced; each family takes it on its own", prev.Path, p.Path, event)
+				continue
+			}
+			seen[event] = p
+		}
+	}
+}
+
+// warnAboutNotes reports a directive whose note points somewhere its own maps do
+// not live, and a constrain whose guard says nothing about its instance.
+func (e *expander) warnAboutNotes() {
+	for _, s := range e.global.Syncs {
+		maps := make([]csdf.Var, 0, len(s.Targets))
+		for _, t := range s.Targets {
+			maps = append(maps, t.Map)
+		}
+		e.warnAboutAnchor(s.Anchor, s.Line, maps)
+	}
+
+	for _, c := range e.global.Constrains {
+		e.warnAboutAnchor(c.Anchor, c.Line, nil)
+
+		named := slices.ContainsFunc(c.Params, func(p string) bool {
+			return strings.Contains(string(c.Guard), p)
+		})
+		if !named {
+			e.warnf(c.Line, "the guard of this constrain names none of its arguments, so it says nothing about the instance")
+		}
+	}
+}
+
+// warnAboutAnchor reports a note pointing at a block of a map the directive does
+// not name. A constrain names no map of its own, so any block it points at is
+// one the reader is meant to look at; only a sync can be checked.
+func (e *expander) warnAboutAnchor(a Anchor, line int, maps []csdf.Var) {
+	if a.State == "" || len(maps) == 0 {
+		return
+	}
+	for _, p := range e.global.Promotes {
+		if p.Alias == a.State && slices.Contains(maps, p.Map) {
+			return
+		}
+	}
+	e.warnf(line, "this note points at %q, which is not a block of any map it names", a.State)
+}
+
+// warnAboutFrozenMaps reports a state that holds a map but has no block for it.
+// It is a thing an author may well mean - a mode in which that family does not
+// move - so it is only worth saying out loud.
+func (e *expander) warnAboutFrozenMaps() {
+	promoted := map[csdf.Var]bool{}
+	for _, p := range e.global.Promotes {
+		promoted[p.Map] = true
+	}
+
+	for _, state := range csdf.SortedStates(e.global.Core.States) {
+		for _, v := range state.Vars {
+			if !promoted[v.Name] {
+				continue
+			}
+			if e.blockOf(v.Name, state.ID).Map != "" {
+				continue
+			}
+			e.infof("state %q holds %q but has no <<promote>> block for it, so the family is frozen there", state.ID, v.Name)
+		}
+	}
+}
+
+// eventsOf returns the event names a local diagram uses, in source order.
+func eventsOf(local *csdf.Diagram) []string {
+	var events []string
+	for _, edge := range local.Edges {
+		if edge.Event == csdf.Tau {
+			continue
+		}
+		if name, _ := splitEvent(edge.Event); !slices.Contains(events, name) {
+			events = append(events, name)
+		}
+	}
+	return events
+}
+
+func (e *expander) warnf(line int, format string, args ...any) {
+	e.diags = append(e.diags, Diagnostic{Severity: SeverityWarning, Line: line, Message: fmt.Sprintf(format, args...)})
+}
+
+func (e *expander) infof(format string, args ...any) {
+	e.diags = append(e.diags, Diagnostic{Severity: SeverityInfo, Message: fmt.Sprintf(format, args...)})
 }
