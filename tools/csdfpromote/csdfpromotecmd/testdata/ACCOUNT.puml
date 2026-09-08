@@ -1,0 +1,7 @@
+@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+open --> none : CLOSE
+@enduml

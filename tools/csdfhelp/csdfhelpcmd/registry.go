@@ -9,6 +9,7 @@ import (
 	"github.com/Kuniwak/puml-parallel/tools/csdfnorm/csdfnormcmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfparallel/csdfparallelcmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfparse/csdfparsecmd"
+	"github.com/Kuniwak/puml-parallel/tools/csdfpromote/csdfpromotecmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfrefinement/csdfrefinementcmd"
 	replcmd "github.com/Kuniwak/puml-parallel/tools/csdfrepl/csdfreplcmd"
 	clientcmd "github.com/Kuniwak/puml-parallel/tools/csdfreplcmd/csdfreplcmdcmd"
@@ -34,6 +35,11 @@ func Registry() []toolsdoc.Entry {
 			Name:    "csdfevents",
 			Summary: "Prints the events used across one or more Composable State Diagrams.",
 			Run:     tools.NewCommandFunc(csdfeventscmd.NewParseOptionsFunc(), csdfeventscmd.NewMainFunc()),
+		},
+		{
+			Name:    "csdfpromote",
+			Summary: "Expands the promotion directives of a Composable State Diagram into ordinary edges.",
+			Run:     tools.NewCommandFunc(csdfpromotecmd.NewParseOptionsFunc(), csdfpromotecmd.NewMainFunc()),
 		},
 		{
 			Name:    "csdfparallel",
