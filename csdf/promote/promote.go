@@ -83,11 +83,23 @@ type edgeWithOrigin struct {
 	Origin string
 }
 
+// Options is what an expansion can be told about how to render itself.
+type Options struct {
+	// Templates renders the generated phrases. A nil value means the default,
+	// symbolic ones (DefaultTemplates).
+	Templates *Templates
+}
+
 // Expand consumes every promotion directive of the diagram. It never fails
 // outright: what goes wrong is reported as a diagnostic, and the caller decides
 // what an error means (Errors).
-func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
+func Expand(global *csdf.Diagram, load Loader, opts Options) (*Result, []Diagnostic) {
 	var diags []Diagnostic
+
+	templates := opts.Templates
+	if templates == nil {
+		templates = defaultTemplates
+	}
 
 	expanded := global.Clone()
 	expanded.Promotes = nil
@@ -106,7 +118,7 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 	// the independent expansions and merged afterwards.
 	synced := make(map[csdf.Var]map[string]bool)
 	for _, sync := range global.Syncs {
-		syncEdges, syncDiags := expandSync(global, sync, promotions)
+		syncEdges, syncDiags := expandSync(global, sync, promotions, templates)
 		diags = append(diags, syncDiags...)
 		edges = append(edges, syncEdges...)
 
@@ -126,7 +138,7 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 				if synced[name][eventName] {
 					continue
 				}
-				edges = append(edges, expandEdge(global, target, promotion.Promote, promotion.Local, localEdge))
+				edges = append(edges, expandEdge(global, target, promotion.Promote, promotion.Local, localEdge, templates))
 			}
 		}
 	}
@@ -317,19 +329,26 @@ type edgeParts struct {
 	Origin    string
 }
 
-func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge) edgeParts {
+func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge, templates *Templates) edgeParts {
 	absent := local.StartEdge.Dst
 	creates := localEdge.Src == absent
 	deletes := localEdge.Dst == absent
 
+	data := clauseData{
+		Map:   promotion.Map,
+		ID:    promotion.IDParam,
+		Src:   stateName(local, localEdge.Src),
+		Dst:   stateName(local, localEdge.Dst),
+		Guard: localEdge.Guard,
+		Post:  localEdge.Post,
+	}
+
 	var guard, post []string
 
 	if creates {
-		guard = append(guard, fmt.Sprintf("%s ∉ dom %s", promotion.IDParam, promotion.Map))
+		guard = append(guard, templates.clause("absent", data))
 	} else {
-		guard = append(guard,
-			fmt.Sprintf("%s ∈ dom %s", promotion.IDParam, promotion.Map),
-			fmt.Sprintf("%s(%s) ∈ 〈%s〉", promotion.Map, promotion.IDParam, stateName(local, localEdge.Src)))
+		guard = append(guard, templates.clause("exists", data), templates.clause("at", data))
 	}
 	if !csdf.IsTrue(localEdge.Guard) {
 		guard = append(guard, string(localEdge.Guard))
@@ -338,13 +357,13 @@ func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csd
 	switch {
 	case creates && deletes:
 		// An event that leaves the instance as absent as it was.
-		post = append(post, fmt.Sprintf("%s' = %s", promotion.Map, promotion.Map))
+		post = append(post, templates.clause("keep", data))
 	case deletes:
-		post = append(post, fmt.Sprintf("%s' = {%s} ⩤ %s", promotion.Map, promotion.IDParam, promotion.Map))
+		post = append(post, templates.clause("delete", data))
 	case creates:
-		post = append(post, fmt.Sprintf("%s' = %s ∪ {%s ↦ 〈%s〉}", promotion.Map, promotion.Map, promotion.IDParam, stateName(local, localEdge.Dst)))
+		post = append(post, templates.clause("insert", data))
 	default:
-		post = append(post, fmt.Sprintf("%s' = %s ⊕ {%s ↦ 〈%s〉}", promotion.Map, promotion.Map, promotion.IDParam, stateName(local, localEdge.Dst)))
+		post = append(post, templates.clause("update", data))
 	}
 	// Deleting an instance discards its local post: the absent state holds
 	// nothing for the post to talk about.
@@ -362,21 +381,21 @@ func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csd
 		Post:      post,
 		EventName: name,
 		Args:      args,
-		Origin:    fmt.Sprintf("%s 〈%s〉 → 〈%s〉", promotion.Path, stateName(local, localEdge.Src), stateName(local, localEdge.Dst)),
+		Origin:    fmt.Sprintf("%s 〈%s〉 → 〈%s〉", promotion.Path, data.Src, data.Dst),
 	}
 }
 
-func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge) edgeWithOrigin {
-	parts := promoteEdgeParts(promotion, local, localEdge)
-	post := append(parts.Post, frame(global, target, promotion.Map)...)
+func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge, templates *Templates) edgeWithOrigin {
+	parts := promoteEdgeParts(promotion, local, localEdge, templates)
+	post := append(parts.Post, frame(global, target, templates, promotion.Map)...)
 
 	return edgeWithOrigin{
 		Edge: csdf.Edge{
 			Src:   target,
 			Dst:   target,
 			Event: promotedEvent(localEdge.Event, parts.EventName, append([]string{promotion.IDParam}, parts.Args...)),
-			Guard: csdf.Predicate(strings.Join(parts.Guard, " ∧ ")),
-			Post:  csdf.Predicate(strings.Join(post, " ∧ ")),
+			Guard: csdf.Predicate(strings.Join(parts.Guard, Conjunction)),
+			Post:  csdf.Predicate(strings.Join(post, Conjunction)),
 		},
 		Origin: "promote: " + parts.Origin,
 	}
@@ -385,13 +404,17 @@ func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promot
 // frame says that the other state variables of the global state do not move.
 // The maps being promoted need no clause of their own: ⊕, ∪ and ⩤ already say
 // what happens to every key but the one at hand.
-func frame(global *csdf.Diagram, target csdf.StateID, promoted ...csdf.Var) []string {
-	var clauses []string
+func frame(global *csdf.Diagram, target csdf.StateID, templates *Templates, promoted ...csdf.Var) []string {
+	var others []csdf.Var
 	for _, v := range global.States[target].Vars {
-		if slices.Contains(promoted, v.Name) {
-			continue
+		if !slices.Contains(promoted, v.Name) {
+			others = append(others, v.Name)
 		}
-		clauses = append(clauses, fmt.Sprintf("%s' = %s", v.Name, v.Name))
+	}
+
+	clauses := make([]string, 0, len(others))
+	for _, other := range others {
+		clauses = append(clauses, templates.clause("unchanged", clauseData{Other: other, OtherMaps: others}))
 	}
 	return clauses
 }
@@ -444,7 +467,7 @@ func hasVar(state csdf.State, name csdf.Var) bool {
 // into one global edge per combination, so that the instances take the event
 // together. The combinations are the cartesian product of the per-map edge
 // groups, because a guard on one side may pick out any state on the other.
-func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*resolvedPromote) ([]edgeWithOrigin, []Diagnostic) {
+func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*resolvedPromote, templates *Templates) ([]edgeWithOrigin, []Diagnostic) {
 	var diags []Diagnostic
 
 	var targets []csdf.StateID
@@ -471,7 +494,7 @@ func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*r
 		var group []edgeParts
 		for _, localEdge := range promotion.Local.Edges {
 			if name, _ := splitEvent(localEdge.Event); name == sync.Event {
-				group = append(group, promoteEdgeParts(renamed, promotion.Local, localEdge))
+				group = append(group, promoteEdgeParts(renamed, promotion.Local, localEdge, templates))
 			}
 		}
 		if len(group) == 0 {
@@ -535,8 +558,8 @@ func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*r
 					Src:   target,
 					Dst:   target,
 					Event: csdf.Event(fmt.Sprintf("%s(%s)", sync.Event, strings.Join(args, ", "))),
-					Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
-					Post:  csdf.Predicate(strings.Join(append(slices.Clone(post), frame(global, target, promoted...)...), " ∧ ")),
+					Guard: csdf.Predicate(strings.Join(guard, Conjunction)),
+					Post:  csdf.Predicate(strings.Join(append(slices.Clone(post), frame(global, target, templates, promoted...)...), Conjunction)),
 				},
 				Origin: fmt.Sprintf("sync: %s %s", sync.Event, strings.Join(origins, " + ")),
 			})
@@ -581,7 +604,7 @@ func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnost
 		if name != constrain.Event || len(args) != len(constrain.Params) {
 			continue
 		}
-		edges[i].Edge.Guard = csdf.Predicate(fmt.Sprintf("%s ∧ %s", edge.Edge.Guard, constrain.Guard))
+		edges[i].Edge.Guard = csdf.Predicate(fmt.Sprintf("%s%s%s", edge.Edge.Guard, Conjunction, constrain.Guard))
 		matched++
 	}
 

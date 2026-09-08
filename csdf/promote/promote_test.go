@@ -44,7 +44,7 @@ open --> none : CLOSE
 	})
 
 	// Act
-	result, diags := promote.Expand(global, load)
+	result, diags := promote.Expand(global, load, promote.Options{})
 
 	// Assert
 	if got := promote.Errors(diags); len(got) > 0 {
@@ -100,7 +100,7 @@ frozen --> open : tau
 	})
 
 	// Act
-	result, diags := promote.Expand(global, load)
+	result, diags := promote.Expand(global, load, promote.Options{})
 
 	// Assert
 	if got := promote.Errors(diags); len(got) > 0 {
@@ -159,7 +159,7 @@ none --> open : OPEN
 	})
 
 	// Act
-	result, diags := promote.Expand(global, load)
+	result, diags := promote.Expand(global, load, promote.Options{})
 
 	// Assert
 	if got := promote.Errors(diags); len(got) > 0 {
@@ -200,7 +200,7 @@ none --> open : OPEN
 // twice.
 func diagnosticsOf(t *testing.T, global *csdf.Diagram, load promote.Loader, severity promote.Severity) []string {
 	t.Helper()
-	_, diags := promote.Expand(global, load)
+	_, diags := promote.Expand(global, load, promote.Options{})
 	var got []string
 	for _, diag := range diags {
 		if diag.Severity == severity {
@@ -391,7 +391,7 @@ counting --> counting : BOOK(数量)
 	})
 
 	// Act
-	result, diags := promote.Expand(global, load)
+	result, diags := promote.Expand(global, load, promote.Options{})
 
 	// Assert
 	if got := promote.Errors(diags); len(got) > 0 {
@@ -450,7 +450,7 @@ open --> frozen : FREEZE(理由)
 	})
 
 	// Act
-	result, diags := promote.Expand(global, load)
+	result, diags := promote.Expand(global, load, promote.Options{})
 
 	// Assert
 	if got := promote.Errors(diags); len(got) > 0 {
@@ -632,5 +632,76 @@ none --> open : OPEN
 	want := []string{`promote via "accounts": the state "maintenance" holds the map but is not in the in clause, so the map is frozen there`}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityInfo)); diff != "" {
 		t.Errorf("info mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandWithTemplates(t *testing.T) {
+	// Arrange: the generated phrases are written in the language of the rest of
+	// the specification, so they can be replaced wholesale.
+	templates, err := promote.ParseTemplates(`
+{{define "exists"}}{{.ID}} は {{.Map}} にある{{end}}
+{{define "absent"}}{{.ID}} は {{.Map}} にない{{end}}
+{{define "at"}}{{.Map}} の {{.ID}} は〈{{.Src}}〉である{{end}}
+{{define "insert"}}{{.Map}} に {{.ID}} を〈{{.Dst}}〉として加える{{end}}
+{{define "update"}}{{.Map}} の {{.ID}} を〈{{.Dst}}〉にする{{end}}
+{{define "delete"}}{{.Map}} から {{.ID}} を除く{{end}}
+{{define "unchanged"}}{{.Other}} は変わらない{{end}}
+`)
+	if err != nil {
+		t.Fatalf("ParseTemplates() = _, %v; want no error", err)
+	}
+
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+running : audits ; 監査ID ⇸ Audit
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+state "凍結中" as frozen
+[*] --> none
+none --> open : OPEN
+open --> frozen : FREEZE
+frozen --> none : CLOSE
+@enduml
+`})
+
+	// Act
+	result, diags := promote.Expand(global, load, promote.Options{Templates: templates})
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+
+	want := []csdf.Edge{
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "CLOSE(口座ID)",
+			Guard: "口座ID は accounts にある ∧ accounts の 口座ID は〈凍結中〉である",
+			Post:  "accounts から 口座ID を除く ∧ audits は変わらない",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "FREEZE(口座ID)",
+			Guard: "口座ID は accounts にある ∧ accounts の 口座ID は〈開設済み〉である",
+			Post:  "accounts の 口座ID を〈凍結中〉にする ∧ audits は変わらない",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "OPEN(口座ID)",
+			Guard: "口座ID は accounts にない",
+			Post:  "accounts に 口座ID を〈開設済み〉として加える ∧ audits は変わらない",
+		},
+	}
+	if diff := cmp.Diff(want, result.Diagram.Edges); diff != "" {
+		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
 	}
 }

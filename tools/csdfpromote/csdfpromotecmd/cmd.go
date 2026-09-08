@@ -3,6 +3,7 @@ package csdfpromotecmd
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/Kuniwak/puml-parallel/cli"
 	"github.com/Kuniwak/puml-parallel/csdf"
@@ -26,7 +27,20 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 
-		result, diags := promote.Expand(global, promote.Loader(csdf.NewFileDiagramLoader(opts.BaseDir)))
+		templates := promote.DefaultTemplates
+		if opts.TemplatePath != "" {
+			bs, err := os.ReadFile(opts.TemplatePath)
+			if err != nil {
+				return fmt.Errorf("csdfpromotecmd.NewMainFunc: cannot read the template file: %w", err)
+			}
+			templates = string(bs)
+		}
+		parsed, err := promote.ParseTemplates(templates)
+		if err != nil {
+			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
+		}
+
+		result, diags := promote.Expand(global, promote.Loader(csdf.NewFileDiagramLoader(opts.BaseDir)), promote.Options{Templates: parsed})
 
 		warnings := 0
 		for _, diag := range diags {

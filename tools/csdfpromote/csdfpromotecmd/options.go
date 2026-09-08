@@ -19,6 +19,9 @@ type Options struct {
 	NoComments bool
 	// Werror makes a warning as fatal as an error.
 	Werror bool
+	// TemplatePath names a file of clause templates that replaces the
+	// generated phrases.
+	TemplatePath string
 	// LintOnly checks the directives without expanding them.
 	LintOnly bool
 	Bytes    []byte
@@ -65,6 +68,7 @@ Examples:
 		noCommentsFlag := flags.Bool("no-comments", false, "do not record where each expanded edge came from")
 		werrorFlag := flags.Bool("Werror", false, "treat warnings as errors")
 		lintOnlyFlag := flags.Bool("lint-only", false, "check the directives without expanding them")
+		templateFlag := flags.String("template", "", "file of clause templates that replaces the generated phrases (default: the symbolic ones)")
 
 		if err := flags.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
@@ -92,13 +96,14 @@ Examples:
 		}
 
 		return &Options{
-			Common:     commonOpts,
-			BaseDir:    baseDir,
-			NoComments: *noCommentsFlag,
-			Werror:     *werrorFlag,
-			LintOnly:   *lintOnlyFlag,
-			Bytes:      bs,
-			Args:       args,
+			Common:       commonOpts,
+			BaseDir:      baseDir,
+			NoComments:   *noCommentsFlag,
+			Werror:       *werrorFlag,
+			LintOnly:     *lintOnlyFlag,
+			TemplatePath: *templateFlag,
+			Bytes:        bs,
+			Args:         args,
 		}, nil
 	}
 }

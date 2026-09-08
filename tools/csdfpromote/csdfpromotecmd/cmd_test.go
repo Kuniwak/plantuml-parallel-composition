@@ -100,3 +100,25 @@ promote ACCOUNT.puml as Account via accounts(口座ID)
 		t.Errorf("want no output for a diagram that failed the check, got %q", spy.Stdout.String())
 	}
 }
+
+func TestNewMainFuncUsesTheGivenTemplates(t *testing.T) {
+	// Arrange: a specification written in Japanese wants its generated phrases
+	// in Japanese too.
+	cmdFunc := tools.NewCommandFunc(NewParseOptionsFunc(), NewMainFunc())
+	spy := cli.SpyProcInout()
+
+	// Act
+	exitStatus := cmdFunc([]string{
+		"-template", "../../../examples/promote/templates/ja.tmpl",
+		"../../../examples/promote/ACCOUNTS.puml",
+	}, spy.New())
+
+	// Assert
+	if exitStatus != 0 {
+		t.Fatalf("want exit status 0, got %d (stderr: %s)", exitStatus, spy.Stderr.String())
+	}
+	want := "OPEN(口座ID) ; 口座ID は accounts にない ; accounts に 口座ID を〈開設済み〉として加える ∧ 残高は 0"
+	if !strings.Contains(spy.Stdout.String(), want) {
+		t.Errorf("stdout does not contain %q\ngot: %s", want, spy.Stdout.String())
+	}
+}

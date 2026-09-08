@@ -1,0 +1,10 @@
+{{/* csdfpromote -template で使う日本語のテンプレート。 */}}
+{{/* 定義しなかった節は既定の記号表記のまま残る。 */}}
+{{define "exists"}}{{.ID}} は {{.Map}} にある{{end}}
+{{define "absent"}}{{.ID}} は {{.Map}} にない{{end}}
+{{define "at"}}{{.Map}} の {{.ID}} は〈{{.Src}}〉である{{end}}
+{{define "insert"}}{{.Map}} に {{.ID}} を〈{{.Dst}}〉として加える{{end}}
+{{define "update"}}{{.Map}} の {{.ID}} を〈{{.Dst}}〉にする{{end}}
+{{define "delete"}}{{.Map}} から {{.ID}} を除く{{end}}
+{{define "keep"}}{{.Map}} は変わらない{{end}}
+{{define "unchanged"}}{{.Other}} は変わらない{{end}}
