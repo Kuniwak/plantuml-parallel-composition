@@ -167,7 +167,11 @@ G --> G : e(p₁, p₂, args…) ; GUARD₁ ∧ GUARD₂ ; POST₁ ∧ POST₂ �
 
 The product is needed because a guard on one side can pick out any state on the other.
 The parameters of the `sync` directive, not those of the `promote` directives, name the
-instance IDs, so one map can be synced with itself under two names.
+instance IDs of the merged edge.
+
+A map cannot be synced with itself: both sides would frame the whole map, so the two
+updates could only be satisfied by one instance being the other. Neither can `tau` be
+synced: an internal event is by definition not shared. Both are errors.
 
 The states are the intersection of the `in` clauses of the promotions. An empty
 intersection is an error: the event could never happen.
@@ -211,6 +215,8 @@ checks without printing.
 | error    | a synced map is not promoted                                                           |
 | error    | a synced event is missing from one of the local diagrams                               |
 | error    | the promotions of the synced maps share no state                                       |
+| error    | a map is synced with itself                                                            |
+| error    | `tau` is synced                                                                        |
 | error    | no expanded edge matches a `constrain` in event name and number of arguments           |
 | warning  | an event is in two local diagrams and is not synced                                    |
 | warning  | the promoted type does not appear in the type of the map                               |

@@ -470,11 +470,31 @@ func hasVar(state csdf.State, name csdf.Var) bool {
 func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*resolvedPromote, templates *Templates) ([]edgeWithOrigin, []Diagnostic) {
 	var diags []Diagnostic
 
+	if sync.Event == string(csdf.Tau) {
+		return nil, []Diagnostic{{
+			Severity: SeverityError,
+			Line:     sync.Line,
+			Message:  fmt.Sprintf("sync %s: an internal event cannot be synchronised", sync.Event),
+		}}
+	}
+
 	var targets []csdf.StateID
 	groups := make([][]edgeParts, 0, len(sync.Targets))
 	ok := true
 
 	for i, ref := range sync.Targets {
+		if slices.ContainsFunc(sync.Targets[:i], func(earlier csdf.MapRef) bool { return earlier.Map == ref.Map }) {
+			// Both sides would frame the whole map, so the two updates could
+			// only be satisfied by one instance being the other.
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     sync.Line,
+				Message:  fmt.Sprintf("sync %s: the map %q is synced with itself; one edge cannot say twice what a map becomes", sync.Event, ref.Map),
+			})
+			ok = false
+			continue
+		}
+
 		promotion, found := promotions[ref.Map]
 		if !found {
 			diags = append(diags, Diagnostic{

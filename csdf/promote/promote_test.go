@@ -756,3 +756,53 @@ sync E : xs(x), ys(y)
 		t.Errorf("guards mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestExpandRefusesToSyncAMapWithItself(t *testing.T) {
+	// Arrange: two instances of one map cannot take an event together, because
+	// one edge cannot say twice what the map becomes.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(買い手)
+sync TRANSFER : accounts(買い手), accounts(売り手)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : TRANSFER
+@enduml
+`})
+
+	want := []string{`sync TRANSFER: the map "accounts" is synced with itself; one edge cannot say twice what a map becomes`}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandRefusesToSyncTau(t *testing.T) {
+	// Arrange: an internal event is by definition not shared, and a synced one
+	// would have to carry the instance ids as arguments.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+sync tau : accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : tau
+@enduml
+`})
+
+	want := []string{"sync tau: an internal event cannot be synchronised"}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
+	}
+}
