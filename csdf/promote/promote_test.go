@@ -203,17 +203,15 @@ none --> open : OPEN
 	}
 }
 
-// diagnosticsOf runs Expand and returns its diagnostics of one severity as
-// strings, so that a test can say what it expects without naming line numbers
-// twice.
-func diagnosticsOf(t *testing.T, global *csdf.Diagram, load csdf.DiagramLoader, severity promote.Severity) []string {
+// diagnose runs Expand once and groups the messages of its diagnostics by
+// severity, so that a test can say what it expects of each without running the
+// expansion again.
+func diagnose(t *testing.T, global *csdf.Diagram, load csdf.DiagramLoader) map[promote.Severity][]string {
 	t.Helper()
 	_, diags := promote.Expand(global, load, promote.Options{})
-	var got []string
+	got := make(map[promote.Severity][]string, 3)
 	for _, diag := range diags {
-		if diag.Severity == severity {
-			got = append(got, diag.Message)
-		}
+		got[diag.Severity] = append(got[diag.Severity], diag.Message)
 	}
 	return got
 }
@@ -359,7 +357,7 @@ sync OPEN : accounts(口座ID), audits(監査ID)
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			got := diagnosticsOf(t, mustParseGlobal(tc.Global), csdf.NewMapDiagramLoader(tc.Sources), promote.SeverityError)
+			got := diagnose(t, mustParseGlobal(tc.Global), csdf.NewMapDiagramLoader(tc.Sources))[promote.SeverityError]
 			if diff := cmp.Diff(tc.Want, got); diff != "" {
 				t.Errorf("errors mismatch (-want +got):\n%s", diff)
 			}
@@ -506,7 +504,7 @@ none --> open : OPEN
 	})
 
 	want := []string{"constrain OPEN/2: no expanded edge carries that event with that many arguments; OPEN/1 does"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -606,10 +604,11 @@ none --> open : OPEN
 		t.Run(name, func(t *testing.T) {
 			global := mustParseGlobal(tc.Global)
 			load := csdf.NewMapDiagramLoader(tc.Sources)
-			if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+			diags := diagnose(t, global, load)
+			if got := diags[promote.SeverityError]; len(got) > 0 {
 				t.Fatalf("Expand() reported errors: %v", got)
 			}
-			if diff := cmp.Diff(tc.Want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+			if diff := cmp.Diff(tc.Want, diags[promote.SeverityWarning]); diff != "" {
 				t.Errorf("warnings mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -638,7 +637,7 @@ none --> open : OPEN
 `})
 
 	want := []string{`promote via "accounts": the state "maintenance" holds the map but is not in the in clause, so the map is frozen there`}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityInfo)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityInfo]); diff != "" {
 		t.Errorf("info mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -785,7 +784,7 @@ none --> open : TRANSFER
 `})
 
 	want := []string{`sync TRANSFER: the map "accounts" is synced with itself; one edge cannot say twice what a map becomes`}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -810,7 +809,7 @@ none --> open : tau
 `})
 
 	want := []string{"sync tau: an internal event cannot be synchronised"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -870,7 +869,7 @@ sync E : xs(x), ys(y)
 	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal, "local/Y.puml": twoStateLocal})
 
 	want := []string{"sync E: the event is already synced at line 8"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -888,11 +887,12 @@ sync E : xs(x)
 `)
 	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal})
 
-	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+	diags := diagnose(t, global, load)
+	if got := diags[promote.SeverityError]; len(got) > 0 {
 		t.Fatalf("Expand() reported errors: %v", got)
 	}
 	want := []string{"sync E: only one map is synced, which is what promoting it alone already does"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+	if diff := cmp.Diff(want, diags[promote.SeverityWarning]); diff != "" {
 		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -919,11 +919,12 @@ sync E : xs(x), ys(y)
 		"local/Z.puml": twoStateLocal,
 	})
 
-	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+	diags := diagnose(t, global, load)
+	if got := diags[promote.SeverityError]; len(got) > 0 {
 		t.Fatalf("Expand() reported errors: %v", got)
 	}
 	want := []string{"the event E is synced, but local/Z.puml also has it and is not in the sync; that instance takes it independently"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+	if diff := cmp.Diff(want, diags[promote.SeverityWarning]); diff != "" {
 		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -947,11 +948,12 @@ none --> open : OPEN
 @enduml
 `})
 
-	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+	diags := diagnose(t, global, load)
+	if got := diags[promote.SeverityError]; len(got) > 0 {
 		t.Fatalf("Expand() reported errors: %v", got)
 	}
 	want := []string{`promote local/ACCOUNT.puml: the start state holds nothing, so the post of its start edge "残高は 0" is ignored; write the initial values on the edges that create an instance`}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+	if diff := cmp.Diff(want, diags[promote.SeverityWarning]); diff != "" {
 		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
 	}
 
@@ -981,7 +983,7 @@ none --> open : OPEN
 `})
 
 	want := []string{`promote local/ACCOUNT.puml: the start state 〈未開設〉 cannot have a self-loop; it means that no such instance exists, so nothing can happen to it`}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -998,7 +1000,7 @@ constrain NOPE(x) ; なにか
 	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal})
 
 	want := []string{"constrain NOPE/1: no expanded edge carries that event with that many arguments; no expanded edge carries NOPE at all"}
-	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+	if diff := cmp.Diff(want, diagnose(t, global, load)[promote.SeverityError]); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
