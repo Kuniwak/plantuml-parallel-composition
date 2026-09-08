@@ -28,8 +28,11 @@ func NewParser(input string) *Parser {
 
 func (p *Parser) Parse() (*Diagram, error) {
 	diagram := &Diagram{
-		States: make(map[StateID]State),
-		Edges:  []Edge{},
+		States:     make(map[StateID]State),
+		Edges:      []Edge{},
+		Promotes:   []Promote{},
+		Syncs:      []Sync{},
+		Constrains: []Constrain{},
 	}
 
 	if !p.expectString("@startuml") {
@@ -71,6 +74,12 @@ func (p *Parser) Parse() (*Diagram, error) {
 				return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
 			}
 			diagram.States[state.ID] = state.State
+		} else if p.peekKeyword("promote") {
+			promote, err := p.parsePromote()
+			if err != nil {
+				return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
+			}
+			diagram.Promotes = append(diagram.Promotes, promote)
 		} else if p.peekString("[*]") {
 			startEdge, err := p.parseStartEdge()
 			if err != nil {
@@ -381,6 +390,155 @@ func (p *Parser) parseEdge() (Edge, error) {
 	}, nil
 }
 
+// parsePromote parses
+//
+//	promote <path> as <Type> via <map>(<idParam>) [in <stateID>, ...]
+//
+// The "in" clause is the set of global states the local diagram is expanded
+// into; omitting it means the destination of the start edge alone.
+func (p *Parser) parsePromote() (Promote, error) {
+	line := p.line
+	if !p.expectString("promote") {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: expected 'promote' at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	path, err := p.parsePath()
+	if err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	if !p.expectString("as") {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: expected 'as' after the local diagram path at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	typeName, err := p.parseID()
+	if err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: expected a type name after 'as' at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	if !p.expectString("via") {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: expected 'via' after the type name at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	mapRef, err := p.parseMapRef()
+	if err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+	}
+
+	var in []StateID
+	if p.peekKeyword("in") {
+		in, err = p.parseInClause()
+		if err != nil {
+			return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: %w", err)
+		}
+	}
+
+	if !p.expectNewlines() {
+		return Promote{}, fmt.Errorf("csdf.Parser.parsePromote: expected newline after promote directive at line %d, col %d", p.line, p.col)
+	}
+
+	return Promote{
+		Path:    path,
+		Type:    typeName,
+		Map:     mapRef.Map,
+		IDParam: mapRef.Param,
+		In:      in,
+		Line:    line,
+	}, nil
+}
+
+func (p *Parser) parseInClause() ([]StateID, error) {
+	if !p.expectString("in") {
+		return nil, fmt.Errorf("csdf.Parser.parseInClause: expected 'in' at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return nil, fmt.Errorf("csdf.Parser.parseInClause: %w", err)
+	}
+
+	var in []StateID
+	for {
+		id, err := p.parseID()
+		if err != nil {
+			return nil, fmt.Errorf("csdf.Parser.parseInClause: expected a state ID after 'in' at line %d, col %d", p.line, p.col)
+		}
+		in = append(in, StateID(id))
+		if err := p.skipInlineTrivia(); err != nil {
+			return nil, fmt.Errorf("csdf.Parser.parseInClause: %w", err)
+		}
+		if !p.expectChar(',') {
+			return in, nil
+		}
+		if err := p.skipInlineTrivia(); err != nil {
+			return nil, fmt.Errorf("csdf.Parser.parseInClause: %w", err)
+		}
+	}
+}
+
+// parseMapRef parses "<map>(<param>)". The parameter is free text, since
+// instance ids are named in the same natural language as the predicates.
+func (p *Parser) parseMapRef() (MapRef, error) {
+	name, err := p.parseID()
+	if err != nil {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: expected a state variable name at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: %w", err)
+	}
+	if !p.expectChar('(') {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: expected '(' after the state variable name at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: %w", err)
+	}
+	param, err := p.parseUntil(',', ')', ';', '\n')
+	if err != nil {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: %w", err)
+	}
+	if param == "" {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: expected a parameter name in '%s(...)' at line %d, col %d", name, p.line, p.col)
+	}
+	if !p.expectChar(')') {
+		return MapRef{}, fmt.Errorf("csdf.Parser.parseMapRef: expected ')' after the parameter name at line %d, col %d", p.line, p.col)
+	}
+	return MapRef{Map: Var(name), Param: param}, nil
+}
+
+// parsePath parses the path of a local diagram: bare up to the next space, or
+// double-quoted when it contains one.
+func (p *Parser) parsePath() (string, error) {
+	if p.peek() == '"' {
+		return p.parseStateName()
+	}
+
+	var result strings.Builder
+	for !p.isAtEnd() && p.peek() != ' ' && p.peek() != '\t' && p.peek() != '\r' && p.peek() != '\n' {
+		result.WriteByte(p.peek())
+		p.advance()
+	}
+	if result.Len() == 0 {
+		return "", fmt.Errorf("csdf.Parser.parsePath: expected a local diagram path at line %d, col %d", p.line, p.col)
+	}
+	return result.String(), nil
+}
+
 func (p *Parser) parseEvent() (Event, error) {
 	event, err := p.parseUntilSemicolon()
 	if err != nil {
@@ -546,6 +704,20 @@ func (p *Parser) expectString(expected string) bool {
 		p.advance()
 	}
 	return true
+}
+
+// peekKeyword reports whether the input at the current position is the given
+// directive keyword followed by a space. The trailing space is what keeps a
+// state named "promoted" or "sync" from being read as a directive.
+func (p *Parser) peekKeyword(keyword string) bool {
+	if !p.peekString(keyword) {
+		return false
+	}
+	if p.pos+len(keyword) >= len(p.input) {
+		return false
+	}
+	next := p.input[p.pos+len(keyword)]
+	return next == ' ' || next == '\t'
 }
 
 func (p *Parser) peekString(expected string) bool {

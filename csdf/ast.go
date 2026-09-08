@@ -44,6 +44,13 @@ type Diagram struct {
 	StartEdge StartEdge         `json:"start_edge"`
 	Edges     []Edge            `json:"edges"`
 	EndEdge   *EndEdge          `json:"end_edge"`
+
+	// Promotion directives (docs/PROMOTION.md). They are empty in every
+	// diagram that has been through csdfpromote, which is the only tool that
+	// accepts them.
+	Promotes   []Promote   `json:"promotes"`
+	Syncs      []Sync      `json:"syncs"`
+	Constrains []Constrain `json:"constrains"`
 }
 
 type State struct {
@@ -145,12 +152,33 @@ func (d *Diagram) Clone() *Diagram {
 		endEdge = &copied
 	}
 
+	promotes := make([]Promote, 0, len(d.Promotes))
+	for _, promote := range d.Promotes {
+		promote.In = append([]StateID{}, promote.In...)
+		promotes = append(promotes, promote)
+	}
+
+	syncs := make([]Sync, 0, len(d.Syncs))
+	for _, sync := range d.Syncs {
+		sync.Targets = append([]MapRef{}, sync.Targets...)
+		syncs = append(syncs, sync)
+	}
+
+	constrains := make([]Constrain, 0, len(d.Constrains))
+	for _, constrain := range d.Constrains {
+		constrain.Params = append([]string{}, constrain.Params...)
+		constrains = append(constrains, constrain)
+	}
+
 	return &Diagram{
-		Name:      d.Name,
-		States:    states,
-		StartEdge: d.StartEdge,
-		Edges:     append([]Edge{}, d.Edges...),
-		EndEdge:   endEdge,
+		Name:       d.Name,
+		States:     states,
+		StartEdge:  d.StartEdge,
+		Edges:      append([]Edge{}, d.Edges...),
+		EndEdge:    endEdge,
+		Promotes:   promotes,
+		Syncs:      syncs,
+		Constrains: constrains,
 	}
 }
 
