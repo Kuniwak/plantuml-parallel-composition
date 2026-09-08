@@ -109,6 +109,42 @@ end note
 			}},
 		},
 
+		// A note for the reader is prose wherever it sits, including after a
+		// directive note: what makes a note a directive is its own first line.
+		"a note for the reader after a directive note": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts ; 口座ID ⇸ Account
+
+  state "accounts : 口座ID ⇸ Account" as runningAccounts <<promote>> {
+    !include local/ACCOUNT.puml
+  }
+}
+[*] --> running
+
+note as n1
+  constrain CLOSE(口座ID) ; 口座ID に未決済がない
+end note
+
+note as n2
+  この注記は読み手のためのもので、
+  sync BOOK : accounts(口座ID) のような行も本文でしかない
+end note
+@enduml
+`,
+			wantPromotes: []promote.Promote{{
+				Map: "accounts", IDParam: "口座ID", Type: "Account",
+				Path: "local/ACCOUNT.puml", Alias: "runningAccounts", In: "running", Line: 5,
+			}},
+			wantConstrains: []promote.Constrain{{
+				Anchor: promote.Anchor{NoteID: "n1"},
+				Event:  "CLOSE",
+				Params: []string{"口座ID"},
+				Guard:  "口座ID に未決済がない",
+				Line:   12,
+			}},
+		},
+
 		// PlantUML lets a note sit inside the composite state it points at, and
 		// that is where an author naturally writes the constrain of one family.
 		"a note inside the composite state it points at": {

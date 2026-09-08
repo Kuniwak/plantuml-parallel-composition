@@ -147,6 +147,7 @@ func (e *expander) syncOrigin(plan syncPlan, blocks []Promote, parts []edgeParts
 func (e *expander) constrain(edges []ExpandedEdge) {
 	for _, c := range e.global.Constrains {
 		matched := 0
+		var taken []string
 		for i := range edges {
 			if edges[i].Origin == "" {
 				continue
@@ -156,11 +157,7 @@ func (e *expander) constrain(edges []ExpandedEdge) {
 				continue
 			}
 			matched++
-			for _, param := range c.Params {
-				if !slices.Contains(args, param) {
-					e.warnf(c.Line, "%s has no argument named %q; the guard says nothing about it", edges[i].Edge.Event, param)
-				}
-			}
+			taken = appendUnique(taken, args...)
 
 			guard := edges[i].Edge.Guard
 			if csdf.IsTrue(guard) {
@@ -171,6 +168,14 @@ func (e *expander) constrain(edges []ExpandedEdge) {
 		}
 		if matched == 0 {
 			e.errorf(c.Line, "no expanded edge is %q with %d argument%s", c.Event, len(c.Params), plural(len(c.Params)))
+			continue
+		}
+		// The directive is one thing, so a name it gets wrong is said once,
+		// however many edges it matched.
+		for _, param := range c.Params {
+			if !slices.Contains(taken, param) {
+				e.warnf(c.Line, "%s has no argument named %q; the guard says nothing about it", c.Event, param)
+			}
 		}
 	}
 }

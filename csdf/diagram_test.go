@@ -68,6 +68,18 @@ state "稼働中" as running
 running --> ; NO-EVENT
 @enduml
 `,
+		// A local diagram wraps its PlantUML-only lines in CSDF-IGNORE, which
+		// is exactly where an !include of a skin or a theme goes. What is
+		// ignored cannot be a directive.
+		"an !include inside a CSDF-IGNORE region": `@startuml A
+' CSDF-IGNORE-BEGIN
+!include style/theme.puml
+' CSDF-IGNORE-END
+state "稼働中" as running
+[*] --> running
+running --> ; NO-EVENT
+@enduml
+`,
 		// A note is PlantUML's, not promotion's. The advice for one that was
 		// not wrapped is CSDF-IGNORE, not csdfpromote.
 		"a plain note": `@startuml A

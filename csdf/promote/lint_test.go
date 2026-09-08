@@ -252,10 +252,15 @@ accNone --> audOpen : AUDIT-BEGIN
 }
 
 func hasDiagnostic(diags []promote.Diagnostic, want string) bool {
+	return countDiagnostic(diags, want) > 0
+}
+
+func countDiagnostic(diags []promote.Diagnostic, want string) int {
+	n := 0
 	for _, d := range diags {
 		if strings.Contains(d.String(), want) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }

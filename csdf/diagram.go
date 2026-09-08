@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/Kuniwak/puml-parallel/pngsrc"
 )
@@ -68,10 +69,36 @@ func withHint(err error, source string) error {
 }
 
 func holdsPromotionDirectives(source string) bool {
+	// What a CSDF-IGNORE region holds is PlantUML's alone - a theme, a skin, a
+	// title - so an !include in there is not a directive.
+	source = withoutIgnoreRegions(source)
+
 	if promotionBlockRe.MatchString(source) {
 		return true
 	}
 	return promotionNoteRe.MatchString(source) && promotionDirectiveRe.MatchString(source)
+}
+
+// withoutIgnoreRegions drops every CSDF-IGNORE region, markers included. An
+// unterminated region runs to the end of the source, which is what the parser
+// will refuse anyway.
+func withoutIgnoreRegions(source string) string {
+	var kept []string
+	ignoring := false
+	for line := range strings.SplitSeq(source, "\n") {
+		switch strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "'")) {
+		case ignoreBeginMarker:
+			ignoring = true
+			continue
+		case ignoreEndMarker:
+			ignoring = false
+			continue
+		}
+		if !ignoring {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 func MustParse(content string) *Diagram {

@@ -10,6 +10,9 @@ func TestExpandWarnsAboutWhatIsProbablyNotMeant(t *testing.T) {
 		global string
 		locals map[string]string
 		want   string
+		// wantCount is how many times the diagnostic must appear, when saying
+		// it once per directive is the point. Zero means at least once.
+		wantCount int
 	}{
 		"a post on the local start edge": {
 			global: syncGlobal,
@@ -59,12 +62,16 @@ end note
 			global: strings.Replace(syncGlobal, `running : buys ; 約定ID ⇸ Buy`, `running : buys ; 約定ID ⇸ Sell`, 1),
 			want:   `warning: line 6: "buys" is promoted as "Buy" but its state variable is written "約定ID ⇸ Sell"`,
 		},
+		// BOOK is merged from two combinations, so the directive matches two
+		// edges. The mistyped argument is one mistake and is said once.
 		"a constrain argument no matching edge has": {
 			global: strings.Replace(syncGlobal, "@enduml", `note as c1
-  constrain BUY(約定ID, zzz) ; zzz は最小取引単位の倍数である
+  constrain BOOK(約定ID, 基準日, zzz) ; zzz は最小取引単位の倍数である
 end note
 @enduml`, 1),
-			want: `warning: line 20: BUY(約定ID, 数量) has no argument named "zzz"; the guard says nothing about it`,
+			locals:    syncLocals,
+			want:      `warning: line 20: BOOK has no argument named "zzz"; the guard says nothing about it`,
+			wantCount: 1,
 		},
 		"a sync whose sides carry different arities": {
 			global: syncGlobal,
@@ -107,8 +114,8 @@ running --> maintenance : MAINT ; true ; buys' = buys ∧ cycles' = cycles
 			if x == nil {
 				t.Fatalf("promote.Expand() expansion = nil; a warning must not stop it: %v", diags)
 			}
-			if !hasDiagnostic(diags, c.want) {
-				t.Errorf("promote.Expand() diagnostics = %v, want one of them to be %q", diags, c.want)
+			if got := countDiagnostic(diags, c.want); got == 0 || (c.wantCount != 0 && got != c.wantCount) {
+				t.Errorf("promote.Expand() has %d diagnostics reading %q, want %d; got %v", got, c.want, max(c.wantCount, 1), diags)
 			}
 		})
 	}

@@ -268,10 +268,11 @@ func (s *scanner) readNote(i int) (int, error) {
 			continue
 		}
 		if !read {
+			before := len(s.syncs) + len(s.constrains)
 			if err := s.readDirective(line, anchor, body+1); err != nil {
 				return 0, err
 			}
-			read = len(s.syncs)+len(s.constrains) > 0
+			read = len(s.syncs)+len(s.constrains) > before
 			if !read {
 				// A note that is not a directive is there for the picture, and
 				// the rest of it is prose.
