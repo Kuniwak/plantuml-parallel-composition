@@ -1,6 +1,6 @@
 # promotion 宣言と `csdfpromote`
 
-改訂 2。改訂 1 からの主な変更：宣言を PlantUML ネイティブ構文（複合状態・`!include`・`note`）で綴る（§2）、上位互換パーサを `csdf/promote` に置き core は変えない（§3・§6）、展開先は親の複合状態で表す（§4.7）、局所 start edge の post は無視する（§4.2）、S₀ の自己ループは error（§4.6）、PNG の不変条件の扱い（§4.9）。
+改訂 2（実装済み。実装中に決めた訂正は各節の「実装」注記に書く）。改訂 1 からの主な変更：宣言を PlantUML ネイティブ構文（複合状態・`!include`・`note`）で綴る（§2）、上位互換パーサを `csdf/promote` に置き core は変えない（§3・§6）、展開先は親の複合状態で表す（§4.7）、局所 start edge の post は無視する（§4.2）、S₀ の自己ループは error（§4.6）、PNG の不変条件の扱い（§4.9）。
 
 ## 0. 背景と目的
 
@@ -162,10 +162,13 @@ eventName       = 1*(unicode_char_except_paren_semicolon)
 - `title` / `note` / `skinparam` など PlantUML 専用行は `!ifndef PROMOTED … !endif` で包む（大局図の先頭で `!define PROMOTED` する）。CSDF-IGNORE 領域と重なるのでそこに入れるだけでよい。
 - 状態 ID（`as` の別名）は局所図間で一意にする。接頭辞（`wl`, `buy`, …）を推奨。
 - start 状態 S₀ は状態変数を持たない。S₀ を終点・始点とするエッジ、および局所 start edge に post を書かない。end edge を置かない（§4.1）。
+- 状態変数名は core の文法どおり ASCII の識別子にする（`var = id`）。型と述語は自然言語でよい。
 
 ## 3. 型（AST）
 
 `csdf/promote` パッケージ内。core の `csdf.Diagram` は変更しない。
+
+**実装での訂正**：`Core` はポインタ（`*csdf.Diagram`）。`Anchor` は `note as` なら `NoteID`、`note <dir> of` なら `State` を持つ 1 つの型にまとめ、`Notes []NoteLink` は置かない。`Promote` には `Line`（1-based 行番号）も持たせる。
 
 ```go
 type GlobalDiagram struct {
@@ -237,7 +240,7 @@ G --> G : e(id, a₁, …, aₙ) ; id ∈ dom m ∧ m(id) ∈ 〈S〉 ∧ g ; m'
 - **生成**（`S = S₀`）：ガードは `id ∉ dom m ∧ g`、事後条件は `m' = m ∪ {id ↦ 〈T〉(…)} ∧ p ∧ FRAME(m)`。`T` の変数の初期値は **この `p` がすべて決める**。
 - **削除**（`T = S₀`）：ガードは通常どおり、事後条件は `m' = {id} ⩤ m ∧ FRAME(m)`。`p` は使わない（§4.6 の warning）。
 - **局所 start edge の post は使わない。** S₀ は変数を持たないので、その付値についての述語は無意味である。start edge に post があれば warning を出して無視する（改訂 1 の「生成エッジに連言する」は撤回）。
-- `FRAME(m)`：「`m` の他のキーは不変、他の写像は不変、`G` の写像以外の変数は不変」。
+- `FRAME(m)`：「他の写像は不変、`G` の写像以外の変数は不変」。**実装での訂正**：`m` の他のキーは書かない。`⊕` / `∪` / `⩤` が `id` 以外の全キーについてすでに言っているので、重ねて書くのは冗長である。
 - `g` / `p` は不透明なので**字面のまま**埋め込む。局所変数 `v` は昇格後 `m(id).v` を指すが、置換はしない（述語は不透明であり、直前の由来コメント §4.8 で文脈が判る）。
 - 同じ `(S, e)` から複数のエッジ（非決定・ガード分岐）はそのまま複数本になる。
 - 生成エッジが複数あって行き先が異なる場合、各エッジの `p` が各行き先の初期値を決める。共通の初期値は各エッジに書く（重複は無害、片方だけの初期値が黙って両方に付く事故を避ける）。
@@ -257,13 +260,13 @@ G --> G : e(p₁, p₂, args…) ; GUARD(x₁)[id:=p₁] ∧ GUARD(x₂)[id:=p�
 ```
 
 - 引数：各局所のイベント引数を順に連結し、同名の引数は 1 つにまとめる（名前一致で判定。同名で意味が違う引数は誤結合するので docs に注意書き）。
-- `sync` に挙げられた写像の `e` エッジは単独では展開しない（併合したものだけを出す）。
+- `sync` に挙げられた写像の `e` エッジは、**併合先の状態では**単独では展開しない（併合したものだけを出す）。交わりの外の状態でその写像が promote されていれば、そこでは単独で展開し、共有イベントの warning が出る。
 - 挙げられていない写像に同名イベントがあれば独立に展開する（かつ warning、§4.6）。
 - 展開先は対象写像の展開先集合（§4.7）の**交わり**。空なら error。
 
 ### 4.5 `constrain`
 
-`constrain e(q₁,…,qₖ) ; c` があるとき、展開後のイベント名 `e` で引数数 `k` の全エッジ（生成・削除・`sync` 済みを含む、すべての展開先状態）のガードに `∧ c` を連言する。`c` は不透明で置換しない。`c` は展開後の引数名で書かれていることを期待し、`q₁…qₖ` のいずれも `c` に現れなければ warning。
+`constrain e(q₁,…,qₖ) ; c` があるとき、展開後のイベント名 `e` で引数数 `k` の全**生成**エッジ（インスタンス生成・削除・`sync` 済みを含む、すべての展開先状態）のガードに `∧ c` を連言する。手書きのエッジには触らない（すでに言うべきことを言っているため）。`c` は不透明で置換しない。`c` は展開後の引数名で書かれていることを期待し、`q₁…qₖ` のいずれも `c` に現れなければ warning。
 
 ### 4.6 lint
 
@@ -319,7 +322,9 @@ warning は stderr、error は exit 1。`-Werror` で warning も exit 1。
 
 ### 4.10 述語のテンプレート
 
-生成する文言（`id ∈ dom m`, `m(id) ∈ 〈S〉`, `m' = m ⊕ {…}`, FRAME）は記号表記を既定にし、言語に依存させない。`-template <file>` で置換可能（Go `text/template`、フィールド：`Map`, `ID`, `Src`, `Dst`, `Guard`, `Post`, `OtherMaps`, `OtherVars`）。日本語版を `examples/promote/templates/ja.tmpl` として同梱。
+生成する文言（`id ∈ dom m`, `m(id) ∈ 〈S〉`, `m' = m ⊕ {…}`, FRAME）は記号表記を既定にし、言語に依存させない。`-template <file>` で置換可能（Go `text/template`）。日本語版を `examples/promote/templates/ja.tmpl` として同梱。
+
+**実装での訂正**：エッジ 1 本ぶんのテンプレートではなく、節ごとの名前付きテンプレートにした。`inDom` / `notInDom` / `atState` / `update` / `create` / `delete` / `frame` / `and` の 8 つで、渡すフィールドは `Map`, `ID`, `Src`, `Dst`, `Var`。ファイルが定義しなかった節は既定のまま残る。読み込み時に全節を 1 度描画するので、描画できないテンプレートは不透明な述語に化けずその場で断られる。
 
 ## 5. CLI
 
@@ -338,16 +343,24 @@ csdfpromote [-base DIR] [-template FILE] [-no-comments] [-Werror] [-lint-only] [
 ## 6. パッケージ構成
 
 ```
-csdf/                  既存。文法は変更しない。宣言の痕跡（"<<promote>>", "!include", "note") を見つけたときの
-                       エラーメッセージに「run csdfpromote first」のヒントを足すだけ
-csdf/promote/parser.go 上位互換パーサ（§2.3）。core の字句・エッジ解釈は csdf パッケージのものを再利用する
-csdf/promote/expand.go 展開（§4.2〜4.5）。Expand(g GlobalDiagram, load func(path) (csdf.Diagram, error), opts) (csdf.Diagram, []Diagnostic, error)
-csdf/promote/lint.go   §4.6
-cli/csdfpromote/       CLI
-docs/PROMOTION.md      意味論、CSP/Z 対応、tau の扱い、置換しない判断、start/削除エッジの post、sync の引数結合、
-                       局所図側の約束（!ifndef PROMOTED、状態 ID の接頭辞）、PNG の扱い
-examples/promote/      golden test の入力と期待出力、日本語テンプレート
+csdf/                       既存。文法は変更しない。宣言の痕跡（"<<promote>>", "!include", "note"）を持つ
+                            図はもともと core の文法で落ちるので、落ちたときだけ
+                            「run csdfpromote on it first」のヒントを足す
+csdf/promote/promote.go     AST（§3）
+csdf/promote/parse.go       上位互換パーサ（§2.3）
+csdf/promote/expand.go      展開（§4.2）と Expand
+csdf/promote/sync.go        sync と constrain（§4.4・§4.5）
+csdf/promote/lint.go        §4.6
+csdf/promote/templates.go   §4.10
+csdf/promote/print.go       由来コメント付きの印字（§4.8）
+csdf/promote/rendercheck/   PlantUML スモークテスト（§7-5）
+tools/csdfpromote/          CLI（リポジトリの慣例に合わせ cli/ ではなく tools/）
+docs/PROMOTION.md           意味論、CSP/Z 対応、tau の扱い、置換しない判断、start/削除エッジの post、sync の引数結合、
+                            局所図側の約束（!ifndef PROMOTED、状態 ID の接頭辞）、PNG の扱い
+examples/promote/           golden test の入力と期待出力、日本語テンプレート
 ```
+
+**実装での訂正**：上位互換パーサは core の字句解析器を呼ばない（`csdf.Parser` の内部は非公開で、公開するのは core への変更になる）。代わりに宣言を行ごとに持ち上げ、持ち上げた行を空行に置き換えた素の CSDF を `csdf.Parse` に渡す。行数が変わらないので、core の報告する行番号は作者の書いた行を指したままになる。印字も core の `Diagram.String` を呼ばず promote 側に置く（由来コメントをエッジの間に入れる先が core にないため）。
 
 core への変更は「ヒント付きエラー」だけに限定する。ヒントは `csdf` のパースエラーに文脈として付けるので、全 CLI に自動で効く。
 
@@ -380,10 +393,10 @@ core への変更は「ヒント付きエラー」だけに限定する。ヒン
 | # | 内容 | 受け入れ条件 |
 |---|---|---|
 | M0 | PlantUML スモークテスト（§7-5）を最初に実行する | 完了。`!include` の挙動が確定し、§2 の綴り方が固まった |
-| M1 | 上位互換パーサ・AST・`-json`・core のヒント付きエラー | 既存 golden test 全通過。§2.1 の例が AST になる |
-| M2 | `promote` のみの展開、lint の error 群、複数状態の大局図 | 単一局所と複数状態の golden test 通過。`csdflivelockfree` / `csdfrepl` に通る |
-| M3 | `sync` / `constrain` / warning・info 群 / `-template` | 全 golden test 通過 |
-| M4 | ドキュメント、`csdfhelp`、README、SYNTAX.md（上位互換文法の節）、GLOSSARY.md | `csdfhelp csdfpromote` が出る。ABNF が実装と一致 |
+| M1 | 上位互換パーサ・AST・`-json`・core のヒント付きエラー | 完了（`-json` は M2 の CLI と一緒に入れた） |
+| M2 | `promote` のみの展開、lint の error 群、複数状態の大局図 | 完了。`csdfsort` / `csdflivelockfree` / `csdfparse` / `csdfrepl` に通る |
+| M3 | `sync` / `constrain` / warning・info 群 / `-template` | 完了。全 golden test 通過 |
+| M4 | ドキュメント、`csdfhelp`、README、SYNTAX.md（上位互換文法の節）、GLOSSARY.md | 完了 |
 | M5（Phase 2） | `csdfrename`、列挙形、相互検算 | 有限 ID で両形が出て、義務ファイルが生成される |
 
 ## 9. 決定済み事項（改訂 1 の §9 を確定）
@@ -402,5 +415,5 @@ core への変更は「ヒント付きエラー」だけに限定する。ヒン
 
 ## 10. 未決事項（実装中に判断）
 
-- `⇸` の ASCII 代替 `->>` を本当に受理するか（PlantUML の見出しに `->>` が出ても描画は問題ない。読みやすさの判断）。
-- `note` の本文に複数の `sync`/`constrain` を書けるようにするか。M3 では 1 note 1 宣言に限定する。
+- `⇸` の ASCII 代替 `->>` を本当に受理するか → 受理した（`promoteTitleRe`）。読みやすさの判断は書き手に委ねる。
+- `note` の本文に複数の `sync`/`constrain` を書けるようにするか → 1 note 1 宣言のまま。最初の非空行だけを読む。
