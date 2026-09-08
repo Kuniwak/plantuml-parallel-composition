@@ -1,0 +1,27 @@
+@startuml auto-generated-by: csdfpromote MODES.puml
+state "稼働中" as running
+running: accounts ; 口座ID ⇸ Account
+running: audits ; 監査ID ⇸ Audit
+state "縮退中" as degraded
+degraded: accounts ; 口座ID ⇸ Account
+degraded: audits ; 監査ID ⇸ Audit
+[*] --> running : accounts と audits は空
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈未開設〉
+degraded --> degraded : CLOSE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ∧ 残高が 0 ; accounts' = {口座ID} ⩤ accounts ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈凍結中〉
+degraded --> degraded : FREEZE(口座ID, 理由) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈凍結中〉} ∧ 凍結理由は 理由 ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈未開設〉 → 〈開設済み〉
+degraded --> degraded : OPEN(口座ID) ; 口座ID ∉ dom accounts ; accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉} ∧ 残高は 0 ∧ audits' = audits
+degraded --> running : RECOVER ; true ; accounts' = accounts ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈凍結中〉 → 〈開設済み〉
+degraded --> degraded : UNFREEZE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈凍結中〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈開設済み〉} ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈未開設〉
+running --> running : CLOSE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ∧ 残高が 0 ; accounts' = {口座ID} ⩤ accounts ∧ audits' = audits
+running --> degraded : DEGRADE ; true ; accounts' = accounts ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈凍結中〉
+running --> running : FREEZE(口座ID, 理由) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈凍結中〉} ∧ 凍結理由は 理由 ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈未開設〉 → 〈開設済み〉
+running --> running : OPEN(口座ID) ; 口座ID ∉ dom accounts ; accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉} ∧ 残高は 0 ∧ audits' = audits
+' promote: local/ACCOUNT.puml 〈凍結中〉 → 〈開設済み〉
+running --> running : UNFREEZE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈凍結中〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈開設済み〉} ∧ audits' = audits
+@enduml

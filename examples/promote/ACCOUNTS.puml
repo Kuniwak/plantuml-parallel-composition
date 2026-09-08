@@ -1,0 +1,8 @@
+@startuml ACCOUNTS
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+
+[*] --> running : accounts は空
+
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml

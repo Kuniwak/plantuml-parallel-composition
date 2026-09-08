@@ -1,0 +1,14 @@
+@startuml ACCOUNT
+' The start state means that no such account exists: leaving it opens an
+' account and entering it closes one.
+state "未開設" as none
+state "開設済み" as open
+state "凍結中" as frozen
+
+[*] --> none
+
+none --> open : OPEN ; true ; 残高は 0
+open --> frozen : FREEZE(理由) ; true ; 凍結理由は 理由
+frozen --> open : UNFREEZE
+open --> none : CLOSE ; 残高が 0
+@enduml

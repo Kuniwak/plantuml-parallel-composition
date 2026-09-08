@@ -1,0 +1,17 @@
+@startuml MODES
+' The same map is driven in two operating modes. The edges that switch modes
+' are hand-written: promotion says nothing about them.
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+running : audits ; 監査ID ⇸ Audit
+state "縮退中" as degraded
+degraded : accounts ; 口座ID ⇸ Account
+degraded : audits ; 監査ID ⇸ Audit
+
+[*] --> running : accounts と audits は空
+
+running --> degraded : DEGRADE ; true ; accounts' = accounts ∧ audits' = audits
+degraded --> running : RECOVER ; true ; accounts' = accounts ∧ audits' = audits
+
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in running, degraded
+@enduml
