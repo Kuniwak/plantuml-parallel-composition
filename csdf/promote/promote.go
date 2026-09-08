@@ -99,23 +99,36 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 		edges = append(edges, edgeWithOrigin{Edge: edge})
 	}
 
-	promotedAt := make(map[csdf.Var]int, len(global.Promotes))
-	for _, promotion := range global.Promotes {
-		if line, ok := promotedAt[promotion.Map]; ok {
-			// Two promotions of one map would each frame the other out, so
-			// neither expansion says what the map does.
-			diags = append(diags, Diagnostic{
-				Severity: SeverityError,
-				Line:     promotion.Line,
-				Message:  fmt.Sprintf("promote via %q: the map is already promoted at line %d", promotion.Map, line),
-			})
-			continue
-		}
-		promotedAt[promotion.Map] = promotion.Line
+	promotions, order, resolveDiags := resolvePromotes(global, load)
+	diags = append(diags, resolveDiags...)
 
-		promoted, promoteDiags := expandPromote(global, promotion, load)
-		diags = append(diags, promoteDiags...)
-		edges = append(edges, promoted...)
+	// A synced event is not the business of any one map, so it is left out of
+	// the independent expansions and merged afterwards.
+	synced := make(map[csdf.Var]map[string]bool)
+	for _, sync := range global.Syncs {
+		syncEdges, syncDiags := expandSync(global, sync, promotions)
+		diags = append(diags, syncDiags...)
+		edges = append(edges, syncEdges...)
+
+		for _, target := range sync.Targets {
+			if synced[target.Map] == nil {
+				synced[target.Map] = make(map[string]bool)
+			}
+			synced[target.Map][sync.Event] = true
+		}
+	}
+
+	for _, name := range order {
+		promotion := promotions[name]
+		for _, target := range promotion.Targets {
+			for _, localEdge := range promotion.Local.Edges {
+				eventName, _ := splitEvent(localEdge.Event)
+				if synced[name][eventName] {
+					continue
+				}
+				edges = append(edges, expandEdge(global, target, promotion.Promote, promotion.Local, localEdge))
+			}
+		}
 	}
 
 	slices.SortFunc(edges, func(a, b edgeWithOrigin) int {
@@ -132,7 +145,46 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 	return &Result{Diagram: expanded, Origins: origins}, diags
 }
 
-func expandPromote(global *csdf.Diagram, promotion csdf.Promote, load Loader) ([]edgeWithOrigin, []Diagnostic) {
+// resolvedPromote is a promote directive with everything it names looked up:
+// the local diagram it promotes and the global states it is expanded into.
+type resolvedPromote struct {
+	Promote csdf.Promote
+	Local   *csdf.Diagram
+	Targets []csdf.StateID
+}
+
+// resolvePromotes checks and loads every promote directive, returning them by
+// map together with the order they were written in.
+func resolvePromotes(global *csdf.Diagram, load Loader) (map[csdf.Var]*resolvedPromote, []csdf.Var, []Diagnostic) {
+	var diags []Diagnostic
+	promotions := make(map[csdf.Var]*resolvedPromote, len(global.Promotes))
+	var order []csdf.Var
+
+	for _, promotion := range global.Promotes {
+		if earlier, ok := promotions[promotion.Map]; ok {
+			// Two promotions of one map would each frame the other out, so
+			// neither expansion says what the map does.
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     promotion.Line,
+				Message:  fmt.Sprintf("promote via %q: the map is already promoted at line %d", promotion.Map, earlier.Promote.Line),
+			})
+			continue
+		}
+
+		resolved, promoteDiags := resolvePromote(global, promotion, load)
+		diags = append(diags, promoteDiags...)
+		if resolved == nil {
+			continue
+		}
+		promotions[promotion.Map] = resolved
+		order = append(order, promotion.Map)
+	}
+
+	return promotions, order, diags
+}
+
+func resolvePromote(global *csdf.Diagram, promotion csdf.Promote, load Loader) (*resolvedPromote, []Diagnostic) {
 	var diags []Diagnostic
 
 	targets := promotion.In
@@ -173,13 +225,7 @@ func expandPromote(global *csdf.Diagram, promotion csdf.Promote, load Loader) ([
 	}
 	diags = append(diags, checkLocal(promotion, local)...)
 
-	var edges []edgeWithOrigin
-	for _, target := range valid {
-		for _, localEdge := range local.Edges {
-			edges = append(edges, expandEdge(global, target, promotion, local, localEdge))
-		}
-	}
-	return edges, diags
+	return &resolvedPromote{Promote: promotion, Local: local, Targets: valid}, diags
 }
 
 // checkLocal reports the ways a local diagram can fail the promotion contract:
@@ -345,4 +391,132 @@ func hasVar(state csdf.State, name csdf.Var) bool {
 		}
 	}
 	return false
+}
+
+// expandSync merges the edges the synced event contributes to each of its maps
+// into one global edge per combination, so that the instances take the event
+// together. The combinations are the cartesian product of the per-map edge
+// groups, because a guard on one side may pick out any state on the other.
+func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*resolvedPromote) ([]edgeWithOrigin, []Diagnostic) {
+	var diags []Diagnostic
+
+	var targets []csdf.StateID
+	groups := make([][]edgeParts, 0, len(sync.Targets))
+	ok := true
+
+	for i, ref := range sync.Targets {
+		promotion, found := promotions[ref.Map]
+		if !found {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     sync.Line,
+				Message:  fmt.Sprintf("sync %s: the map %q is not promoted", sync.Event, ref.Map),
+			})
+			ok = false
+			continue
+		}
+
+		// The sync directive names the instance ids, so its parameter is the
+		// one the promoted predicates must speak of.
+		renamed := promotion.Promote
+		renamed.IDParam = ref.Param
+
+		var group []edgeParts
+		for _, localEdge := range promotion.Local.Edges {
+			if name, _ := splitEvent(localEdge.Event); name == sync.Event {
+				group = append(group, promoteEdgeParts(renamed, promotion.Local, localEdge))
+			}
+		}
+		if len(group) == 0 {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     sync.Line,
+				Message:  fmt.Sprintf("sync %s: %s has no such event", sync.Event, promotion.Promote.Path),
+			})
+			ok = false
+			continue
+		}
+		groups = append(groups, group)
+
+		if i == 0 {
+			targets = slices.Clone(promotion.Targets)
+			continue
+		}
+		targets = slices.DeleteFunc(targets, func(target csdf.StateID) bool {
+			return !slices.Contains(promotion.Targets, target)
+		})
+	}
+
+	if !ok {
+		return nil, diags
+	}
+	if len(targets) == 0 {
+		diags = append(diags, Diagnostic{
+			Severity: SeverityError,
+			Line:     sync.Line,
+			Message:  fmt.Sprintf("sync %s: the promotions of its maps share no state, so the event can never happen", sync.Event),
+		})
+		return nil, diags
+	}
+
+	promoted := make([]csdf.Var, 0, len(sync.Targets))
+	for _, ref := range sync.Targets {
+		promoted = append(promoted, ref.Map)
+	}
+
+	var edges []edgeWithOrigin
+	for _, combination := range product(groups) {
+		args := make([]string, 0, len(sync.Targets))
+		for _, ref := range sync.Targets {
+			args = appendUnique(args, ref.Param)
+		}
+		var guard, post, origins []string
+		for _, part := range combination {
+			guard = append(guard, part.Guard...)
+			post = append(post, part.Post...)
+			origins = append(origins, part.Origin)
+			// Arguments of the same name are one argument: the instances agree
+			// on the value the shared event carries.
+			for _, arg := range part.Args {
+				args = appendUnique(args, arg)
+			}
+		}
+
+		for _, target := range targets {
+			edges = append(edges, edgeWithOrigin{
+				Edge: csdf.Edge{
+					Src:   target,
+					Dst:   target,
+					Event: csdf.Event(fmt.Sprintf("%s(%s)", sync.Event, strings.Join(args, ", "))),
+					Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
+					Post:  csdf.Predicate(strings.Join(append(slices.Clone(post), frame(global, target, promoted...)...), " ∧ ")),
+				},
+				Origin: fmt.Sprintf("sync: %s %s", sync.Event, strings.Join(origins, " + ")),
+			})
+		}
+	}
+	return edges, diags
+}
+
+// product enumerates one choice from each group, in the order the groups were
+// given.
+func product(groups [][]edgeParts) [][]edgeParts {
+	combinations := [][]edgeParts{{}}
+	for _, group := range groups {
+		next := make([][]edgeParts, 0, len(combinations)*len(group))
+		for _, combination := range combinations {
+			for _, part := range group {
+				next = append(next, append(slices.Clone(combination), part))
+			}
+		}
+		combinations = next
+	}
+	return combinations
+}
+
+func appendUnique(args []string, arg string) []string {
+	if slices.Contains(args, arg) {
+		return args
+	}
+	return append(args, arg)
 }

@@ -2,6 +2,7 @@ package promote_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Kuniwak/puml-parallel/csdf"
@@ -305,6 +306,47 @@ promote local/ACCOUNT.puml as Account via accounts(別の口座ID)
 			Sources: map[string]string{"local/ACCOUNT.puml": local},
 			Want:    []string{`promote via "accounts": the map is already promoted at line 5`},
 		},
+		"a synced map is not promoted": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+sync OPEN : accounts(口座ID), audits(監査ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`sync OPEN: the map "audits" is not promoted`},
+		},
+		"a synced event is missing from a local diagram": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+sync CLOSE : accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`sync CLOSE: local/ACCOUNT.puml has no such event`},
+		},
+		"the promotions of the synced maps share no state": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+running : audits
+state "縮退中" as degraded
+degraded : accounts
+degraded : audits
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in running
+promote local/ACCOUNT.puml as Audit via audits(監査ID) in degraded
+sync OPEN : accounts(口座ID), audits(監査ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`sync OPEN: the promotions of its maps share no state, so the event can never happen`},
+		},
 	}
 
 	for name, tc := range testCases {
@@ -314,5 +356,70 @@ promote local/ACCOUNT.puml as Account via accounts(別の口座ID)
 				t.Errorf("errors mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestExpandMergesSyncedEdges(t *testing.T) {
+	// Arrange: booking a buy trade and counting it into the segregation report
+	// is one event, so the two instances must take it together.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : buys ; 約定ID ⇸ Buy
+running : cycles ; 基準日 ⇸ Cycle
+[*] --> running
+promote local/BUY.puml as Buy via buys(約定ID)
+promote local/CYCLE.puml as Cycle via cycles(基準日)
+sync BOOK : buys(約定ID), cycles(基準日)
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/BUY.puml": `@startuml
+state "なし" as none
+state "約定済み" as booked
+[*] --> none
+none --> booked : BOOK(数量)
+@enduml
+`,
+		"local/CYCLE.puml": `@startuml
+state "未開始" as idle
+state "集計中" as counting
+[*] --> idle
+idle --> counting : BOOK(数量)
+counting --> counting : BOOK(数量)
+@enduml
+`,
+	})
+
+	// Act
+	result, diags := promote.Expand(global, load)
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+
+	want := []csdf.Edge{
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "BOOK(約定ID, 基準日, 数量)",
+			Guard: "約定ID ∉ dom buys ∧ 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈集計中〉",
+			Post:  "buys' = buys ∪ {約定ID ↦ 〈約定済み〉} ∧ cycles' = cycles ⊕ {基準日 ↦ 〈集計中〉}",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "BOOK(約定ID, 基準日, 数量)",
+			Guard: "約定ID ∉ dom buys ∧ 基準日 ∉ dom cycles",
+			Post:  "buys' = buys ∪ {約定ID ↦ 〈約定済み〉} ∧ cycles' = cycles ∪ {基準日 ↦ 〈集計中〉}",
+		},
+	}
+	if diff := cmp.Diff(want, result.Diagram.Edges); diff != "" {
+		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
+	}
+	for i, origin := range result.Origins {
+		if !strings.HasPrefix(origin, "sync: BOOK ") {
+			t.Errorf("Origins[%d] = %q; want it to record the sync", i, origin)
+		}
 	}
 }
