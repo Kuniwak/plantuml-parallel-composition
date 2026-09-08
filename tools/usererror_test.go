@@ -33,3 +33,19 @@ func TestUserFacingError(t *testing.T) {
 		})
 	}
 }
+
+type userFacingError struct{ err error }
+
+func (e *userFacingError) Error() string { return e.err.Error() + ": and here is what to do" }
+func (e *userFacingError) Unwrap() error { return e.err }
+func (e *userFacingError) UserFacing()   {}
+
+// An error that says it is written for the reader is where unwrapping stops.
+// Otherwise what it adds would be dropped on the way to the terminal.
+func TestUserFacingErrorStopsAtAUserFacingError(t *testing.T) {
+	err := fmt.Errorf("outer: %w", &userFacingError{err: errors.New("inner")})
+
+	if got, want := UserFacingError(err, false), "inner: and here is what to do"; got != want {
+		t.Errorf("UserFacingError() = %q, want %q", got, want)
+	}
+}

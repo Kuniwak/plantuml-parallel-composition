@@ -1,7 +1,6 @@
 package csdf
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -9,17 +8,33 @@ import (
 	"github.com/Kuniwak/puml-parallel/pngsrc"
 )
 
-// promotionTraceRe matches what a global diagram carries and a plain one does
-// not: a <<promote>> block, the !include that names its local diagram, or the
-// note a sync or constrain is written in. Such a diagram's edges are not the
-// whole of its behaviour, so parsing it here would be worse than failing - and
-// it does fail, on syntax the core grammar has no rule for. The hint says what
-// the author is missing rather than leaving them to read a column number.
-var promotionTraceRe = regexp.MustCompile(`(?m)^\s*(?:<<promote>>|!include\s|note\s+(?:as|left|right|top|bottom)\s)|<<promote>>`)
+// What a global diagram carries and a plain one does not. Such a diagram's edges
+// are not the whole of its behaviour, so parsing it here would be worse than
+// failing - and it does fail, on syntax the core grammar has no rule for. The
+// hint says what the author is missing rather than leaving them to read a column
+// number.
+//
+// A note on its own is not a trace: notes are PlantUML's, and the advice for one
+// that was not wrapped is CSDF-IGNORE. It counts only next to a directive body.
+var (
+	promotionBlockRe     = regexp.MustCompile(`(?m)^\s*state\s.*<<promote>>|^\s*!include\s`)
+	promotionNoteRe      = regexp.MustCompile(`(?m)^\s*note\s+(?:as|left|right|top|bottom)\s`)
+	promotionDirectiveRe = regexp.MustCompile(`(?m)^\s*(?:sync|constrain)\s`)
+)
 
-// promotionHint is appended to a parse error when the source looks like a global
-// diagram that has not been expanded yet.
-const promotionHint = "the source holds promotion directives; run csdfpromote on it first"
+// PromotionHintError is a parse error on a source that still holds promotion
+// directives. It wraps the parse error, so a caller can still reach it.
+type PromotionHintError struct{ err error }
+
+func (e *PromotionHintError) Error() string {
+	return e.err.Error() + ": the source holds promotion directives; run csdfpromote on it first"
+}
+
+func (e *PromotionHintError) Unwrap() error { return e.err }
+
+// UserFacing marks this error's own message as the one to show, so that the
+// hint is not unwrapped away on its road to the terminal.
+func (e *PromotionHintError) UserFacing() {}
 
 // ParseBytes parses a Composable State Diagram from raw .puml text or .png
 // bytes (the embedded PlantUML source is extracted from PNG inputs).
@@ -44,14 +59,19 @@ func Parse(content string) (*Diagram, error) {
 }
 
 // withHint adds the promotion hint to a parse error when the source looks like a
-// global diagram. It returns a fresh error rather than wrapping, because the
-// message a user sees is the deepest error of the chain: a hint on an outer
-// wrapper would only show under -debug, which is not where it is needed.
+// global diagram.
 func withHint(err error, source string) error {
-	if !promotionTraceRe.MatchString(source) {
+	if !holdsPromotionDirectives(source) {
 		return err
 	}
-	return errors.New(err.Error() + ": " + promotionHint)
+	return &PromotionHintError{err: err}
+}
+
+func holdsPromotionDirectives(source string) bool {
+	if promotionBlockRe.MatchString(source) {
+		return true
+	}
+	return promotionNoteRe.MatchString(source) && promotionDirectiveRe.MatchString(source)
 }
 
 func MustParse(content string) *Diagram {
