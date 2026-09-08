@@ -304,3 +304,37 @@ func TestLoadGlobalReadsTheWorkedExamples(t *testing.T) {
 		})
 	}
 }
+
+// PlantUML lets a note sit inside the composite state it points at, and that is
+// where an author naturally writes the constrain of one family.
+func TestParseGlobalReadsANoteInsideACompositeState(t *testing.T) {
+	g, err := promote.ParseGlobal(`@startuml A
+state "稼働中" as running {
+  running : accounts ; 口座ID ⇸ Account
+
+  state "accounts : 口座ID ⇸ Account" as runningAccounts <<promote>> {
+    !include local/ACCOUNT.puml
+  }
+
+  note bottom of runningAccounts
+    constrain CLOSE(口座ID) ; 口座ID に未決済がない
+  end note
+}
+[*] --> running
+@enduml
+`)
+	if err != nil {
+		t.Fatalf("promote.ParseGlobal() error = %v", err)
+	}
+
+	want := []promote.Constrain{{
+		Anchor: promote.Anchor{State: "runningAccounts"},
+		Event:  "CLOSE",
+		Params: []string{"口座ID"},
+		Guard:  "口座ID に未決済がない",
+		Line:   10,
+	}}
+	if diff := cmp.Diff(want, g.Constrains); diff != "" {
+		t.Errorf("promote.ParseGlobal() constrains mismatch (-want +got):\n%s", diff)
+	}
+}

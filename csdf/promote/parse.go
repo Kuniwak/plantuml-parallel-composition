@@ -136,6 +136,14 @@ func (s *scanner) readComposite(i int) (int, error) {
 			i = n
 		case compositeOpenRe.MatchString(text):
 			return 0, fmt.Errorf("line %d: composite state is nested inside %q; only a <<promote>> block may be nested", i+1, s.parent)
+		case noteFloatingRe.MatchString(text), noteAnchoredRe.MatchString(text):
+			// PlantUML lets a note sit inside the state it points at, which is
+			// where the constrain of one family naturally goes.
+			n, err := s.readNote(i)
+			if err != nil {
+				return 0, err
+			}
+			i = n
 		case strings.HasPrefix(text, "!"):
 			s.blank(1)
 			i++
