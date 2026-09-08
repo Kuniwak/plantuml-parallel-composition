@@ -13,8 +13,9 @@ import (
 )
 
 // TestGoldenExamples expands every example under examples/promote and compares
-// the result with the recorded expansion next to it. Run with -update to
-// rewrite the recordings.
+// the result with the recorded expansion next to it. Setting UPDATE_GOLDEN
+// rewrites the recordings instead of checking them, so that run proves nothing
+// on its own: read the diff it leaves in the working tree.
 func TestGoldenExamples(t *testing.T) {
 	const examplesDir = "../../../examples/promote"
 

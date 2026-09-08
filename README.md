@@ -98,9 +98,9 @@ condition that reaches across maps. The start state of a local diagram means
 "this instance does not exist", so leaving it creates an instance and entering it
 deletes one.
 
-Every other tool refuses a diagram that still carries directives — its edges are
-not the whole of its behaviour — so `csdfpromote` comes first in any pipeline
-over a promoted specification. See [Promotion](docs/PROMOTION.md) for the
+Every tool but `csdfparse` refuses a diagram that still carries directives — its
+edges are not the whole of its behaviour — so `csdfpromote` comes first in any
+pipeline over a promoted specification. See [Promotion](docs/PROMOTION.md) for the
 semantics, the checks it performs, and how to write the generated phrases in your
 own language.
 
