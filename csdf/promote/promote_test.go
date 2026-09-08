@@ -1,6 +1,7 @@
 package promote_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Kuniwak/puml-parallel/csdf"
@@ -138,5 +139,124 @@ end note
 	}}
 	if diff := cmp.Diff(wantConstrains, g.Constrains); diff != "" {
 		t.Errorf("promote.ParseGlobal() constrains mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseGlobalRefusals(t *testing.T) {
+	cases := map[string]struct {
+		source string
+		want   string
+	}{
+		"a title that does not name a map": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+  state "accounts" as runningAccounts <<promote>> {
+    !include local/ACCOUNT.puml
+  }
+}
+[*] --> running
+@enduml
+`,
+			want: `line 4: expected a <<promote>> title of the form "<map> : <ID> ⇸ <Type>", got "accounts"`,
+		},
+		"a block body that is not an include": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+  state "accounts : 口座ID ⇸ Account" as runningAccounts <<promote>> {
+    state "x" as x
+  }
+}
+[*] --> running
+@enduml
+`,
+			want: `line 5: expected a single !include in the <<promote>> block opened at line 4, got "state \"x\" as x"`,
+		},
+		"a block body with more than an include": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+  state "accounts : 口座ID ⇸ Account" as runningAccounts <<promote>> {
+    !include local/ACCOUNT.puml
+    !include local/AUDIT.puml
+  }
+}
+[*] --> running
+@enduml
+`,
+			want: `line 4: expected a single !include in the <<promote>> block opened at line 4`,
+		},
+		"a composite state nested in another": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+  state "内側" as inner {
+  }
+}
+[*] --> running
+@enduml
+`,
+			want: `line 4: composite state is nested inside "running"; only a <<promote>> block may be nested`,
+		},
+		"a sync body that does not parse": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+}
+[*] --> running
+note as n1
+  sync BOOK buys(約定ID)
+end note
+@enduml
+`,
+			want: `line 7: expected "sync <event> : <map>(<param>), ...", got "sync BOOK buys(約定ID)"`,
+		},
+		"a constrain body that does not parse": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+}
+[*] --> running
+note as n1
+  constrain BUY(約定ID)
+end note
+@enduml
+`,
+			want: `line 7: expected "constrain <event>(<param>, ...) ; <guard>", got "constrain BUY(約定ID)"`,
+		},
+		"an unterminated note": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+}
+[*] --> running
+note as n1
+  sync BOOK : buys(約定ID)
+@enduml
+`,
+			want: `line 6: unterminated note`,
+		},
+		"an unterminated composite state": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+[*] --> running
+@enduml
+`,
+			want: `unterminated composite state "running"`,
+		},
+	}
+
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := promote.ParseGlobal(c.source)
+			if err == nil {
+				t.Fatalf("promote.ParseGlobal() error = nil, want %q", c.want)
+			}
+			if got := err.Error(); !strings.Contains(got, c.want) {
+				t.Errorf("promote.ParseGlobal() error = %q, want it to contain %q", got, c.want)
+			}
+		})
 	}
 }
