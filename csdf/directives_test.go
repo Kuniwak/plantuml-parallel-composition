@@ -1,6 +1,9 @@
 package csdf
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParsePromoteDirective(t *testing.T) {
 	input := `@startuml
@@ -194,5 +197,27 @@ func TestParseRejectsMalformedDirectives(t *testing.T) {
 				t.Errorf("Parse() = _, nil; want an error for %q", directive)
 			}
 		})
+	}
+}
+
+func TestParseBytesRejectsDirectives(t *testing.T) {
+	input := []byte(`@startuml
+state "running" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+
+	_, err := ParseBytes(input)
+	if err == nil {
+		t.Fatalf("ParseBytes() = _, nil; want an error")
+	}
+	if !strings.Contains(err.Error(), "csdfpromote") {
+		t.Errorf("ParseBytes() error = %q; want it to name csdfpromote", err)
+	}
+
+	if _, err := ParseBytesAllowingDirectives(input); err != nil {
+		t.Errorf("ParseBytesAllowingDirectives() = _, %v; want no error", err)
 	}
 }

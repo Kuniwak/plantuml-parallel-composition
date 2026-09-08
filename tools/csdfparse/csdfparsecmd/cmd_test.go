@@ -81,3 +81,38 @@ func TestNewMainFuncVersion(t *testing.T) {
 		t.Error(diff)
 	}
 }
+
+func TestNewMainFuncPrintsDirectives(t *testing.T) {
+	// Arrange: csdfparse is the one tool that reports directives instead of
+	// refusing them, because reporting the diagram is all it does.
+	input := `@startuml
+state "running" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in running
+sync EVT-BOOK : accounts(口座ID)
+constrain EVT-OPEN(口座ID) ; 未開設
+@enduml
+`
+	cmdFunc := tools.NewCommandFunc(NewParseOptionsFunc(), NewMainFunc())
+	spy := cli.SpyProcInout()
+	spy.Stdin = cli.StubStdin(strings.NewReader(input))
+
+	// Act
+	exitStatus := cmdFunc([]string{}, spy.New())
+
+	// Assert
+	if exitStatus != 0 {
+		t.Errorf("want exit status 0, got %d (stderr: %s)", exitStatus, spy.Stderr.String())
+	}
+	got := spy.Stdout.String()
+	for _, want := range []string{
+		`"promotes":[{"path":"local/ACCOUNT.puml","type":"Account","map":"accounts","id_param":"口座ID","in":["running"],"line":5}]`,
+		`"syncs":[{"event":"EVT-BOOK","targets":[{"map":"accounts","param":"口座ID"}],"line":6}]`,
+		`"constrains":[{"event":"EVT-OPEN","params":["口座ID"],"guard":"未開設","line":7}]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stdout does not contain %s\ngot: %s", want, got)
+		}
+	}
+}

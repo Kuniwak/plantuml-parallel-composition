@@ -19,7 +19,10 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return nil
 		}
 
-		diagram, err := csdf.ParseBytes(opts.Bytes)
+		// Directives are reported, not refused: printing the diagram is all
+		// this tool does, and a diagram that still carries them is exactly what
+		// its author wants to inspect.
+		diagram, err := csdf.ParseBytesAllowingDirectives(opts.Bytes)
 		if err != nil {
 			return fmt.Errorf("csdfparsecmd.NewMainFunc: %w", err)
 		}

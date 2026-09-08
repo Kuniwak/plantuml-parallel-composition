@@ -1,6 +1,7 @@
 package csdf
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -8,8 +9,27 @@ import (
 )
 
 // ParseBytes parses a Composable State Diagram from raw .puml text or .png
-// bytes (the embedded PlantUML source is extracted from PNG inputs).
+// bytes (the embedded PlantUML source is extracted from PNG inputs). It rejects
+// a diagram that still carries promotion directives, because the edges of such
+// a diagram are not the whole of its behaviour.
 func ParseBytes(content []byte) (*Diagram, error) {
+	diagram, err := ParseBytesAllowingDirectives(content)
+	if err != nil {
+		return nil, err
+	}
+	if diagram.HasDirectives() {
+		return nil, fmt.Errorf("csdf.ParseBytes: %w", ErrDirectives)
+	}
+	return diagram, nil
+}
+
+// ErrDirectives is what every tool but csdfpromote reports for a diagram that
+// still carries promotion directives.
+var ErrDirectives = errors.New("diagram contains promotion directives (promote/sync/constrain); run csdfpromote first")
+
+// ParseBytesAllowingDirectives is ParseBytes without that rejection. Only
+// csdfpromote, which consumes the directives, may use it.
+func ParseBytesAllowingDirectives(content []byte) (*Diagram, error) {
 	source, err := pngsrc.Extract(content)
 	if err != nil {
 		return nil, fmt.Errorf("csdf.ParseBytes: reading PlantUML source: %w", err)

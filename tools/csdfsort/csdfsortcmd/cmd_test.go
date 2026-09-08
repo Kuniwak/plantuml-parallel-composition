@@ -90,3 +90,28 @@ func TestNewMainFuncReportsParseErrors(t *testing.T) {
 		t.Error("want non-zero exit status, got 0")
 	}
 }
+
+func TestNewMainFuncRejectsDirectives(t *testing.T) {
+	// Arrange: a diagram whose behaviour is still hidden in its directives is
+	// not one this tool may act on.
+	cmdFunc := tools.NewCommandFunc(NewParseOptionsFunc(), NewMainFunc())
+	spy := cli.SpyProcInout()
+	spy.Stdin = cli.StubStdin(strings.NewReader(`@startuml
+state "running" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`))
+
+	// Act
+	exitStatus := cmdFunc([]string{}, spy.New())
+
+	// Assert
+	if exitStatus == 0 {
+		t.Errorf("want a non-zero exit status, got 0")
+	}
+	if !strings.Contains(spy.Stderr.String(), "csdfpromote") {
+		t.Errorf("want stderr to name csdfpromote, got %q", spy.Stderr.String())
+	}
+}
