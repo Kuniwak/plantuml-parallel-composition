@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,6 +51,12 @@ func TestGlobalDiagramsRender(t *testing.T) {
 	}
 
 	for _, path := range paths {
+		// The expanded form is one state with a bundle of self-loops. It is
+		// never drawn, so there is nothing to check about how it renders.
+		if strings.HasSuffix(path, ".expanded.puml") {
+			continue
+		}
+
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
 			defer cancel()
