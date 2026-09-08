@@ -375,7 +375,7 @@ examples/promote/           golden test の入力と期待出力、日本語テ�
 
 core への変更は「ヒント付きエラー」だけに限定する。ヒントは `csdf` のパースエラーに文脈として付けるので、全 CLI に自動で効く。
 
-**実装での訂正**：core にもう 1 つだけ足した。`csdf.Diagram.StringWithEdgeComments(before func(int) string)` で、エッジの直前に差し込む行を呼び出し側が決められるようにする。文法には触れず、`String()` はこれを nil で呼ぶだけになる。これを足さないと promote 側が core の印字を丸ごと写すことになり、コメント自身が「keep the two in step」と書くような乖離の種を残す。あわせて `tools.UserFacing`（自分の文面が読み手向けだと言うエラーで unwrap を止める規則）を足した。
+**実装での訂正**：core にもう 1 つだけ足した。`csdf.Diagram.StringWithEdgeComments(before func(int) string)` で、エッジの直前に差し込む行を呼び出し側が決められるようにする。文法には触れず、`String()` はこれを nil で呼ぶだけになる。これを足さないと promote 側が core の印字を丸ごと写すことになり、コメント自身が「keep the two in step」と書くような乖離の種を残す。あわせて `tools.UserFacing`（自分の文面が読み手向けだと言うエラーで unwrap を止める規則）を足した。ヒントの文面は 2 つに割れている：`csdf` は「宣言が残っている」という事実だけを `PromotionHintError` で言い、「`csdfpromote` を先に実行せよ」という助言は `tools` が足す。文法のパッケージが CLI の名前を知らずに済む。
 
 ## 7. テスト
 
