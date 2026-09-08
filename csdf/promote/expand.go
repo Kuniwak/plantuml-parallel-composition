@@ -69,7 +69,7 @@ var eventRe = regexp.MustCompile(`^([^()]+?)\s*\(\s*(.*?)\s*\)$`)
 
 // Expand turns every promotion into edges on the state its block was written in.
 func Expand(g *GlobalDiagram, load LoadFunc) (*Expansion, []Diagnostic, error) {
-	e := &expander{global: g, load: load, locals: map[csdf.Var]*csdf.Diagram{}, paths: map[csdf.Var]string{}}
+	e := &expander{global: g, load: load, locals: map[csdf.Var]*csdf.Diagram{}, paths: map[csdf.Var]string{}, owned: map[ownership]bool{}}
 	return e.run()
 }
 
@@ -84,6 +84,10 @@ type expander struct {
 	// order is the block that carries each map's !include, in source order, so
 	// the checks and the expansion read the maps in the order they were written.
 	order []Promote
+	// plans is one worked-out sync per directive, and owned marks the events a
+	// sync took over so that the maps do not expand them on their own.
+	plans []syncPlan
+	owned map[ownership]bool
 	diags []Diagnostic
 }
 
@@ -102,10 +106,19 @@ func (e *expander) run() (*Expansion, []Diagnostic, error) {
 			continue
 		}
 		for _, edge := range local.Edges {
+			if name, _ := splitEvent(edge.Event); e.owned[ownership{p.In, p.Map, name}] {
+				continue
+			}
 			expanded, origin := e.promoteEdge(p, edge)
 			out.Edges = append(out.Edges, expanded)
 			origins = append(origins, origin)
 		}
+	}
+
+	e.mergeSyncs(out, &origins)
+	e.constrain(out, origins)
+	if hasError(e.diags) {
+		return nil, e.diags, nil
 	}
 
 	x := &Expansion{Diagram: out, Origins: origins}

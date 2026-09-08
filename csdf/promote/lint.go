@@ -14,6 +14,12 @@ func (e *expander) check() {
 	e.checkBlocks()
 	e.loadLocals()
 	e.checkLocals()
+	if hasError(e.diags) {
+		// The syncs are read against the local diagrams, which are not all
+		// there when a block is in error.
+		return
+	}
+	e.planSyncs()
 }
 
 // checkBlocks reads the <<promote>> blocks against each other and against the
