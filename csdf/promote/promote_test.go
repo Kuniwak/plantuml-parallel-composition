@@ -10,6 +10,17 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+// mustParseGlobal parses a global diagram, promotion directives and all. The
+// ordinary entry points refuse those, since csdfpromote is the only reader of a
+// diagram that still has them.
+func mustParseGlobal(source string) *csdf.Diagram {
+	diagram, err := csdf.ParseAllowingDirectives(source)
+	if err != nil {
+		panic(err)
+	}
+	return diagram
+}
+
 // stubLoader answers with the diagrams it was built from, and reports every
 // other path as missing, the way the file system would.
 func stubLoader(sources map[string]string) promote.Loader {
@@ -25,7 +36,7 @@ func stubLoader(sources map[string]string) promote.Loader {
 func TestExpandPromotesEveryLocalEdge(t *testing.T) {
 	// Arrange: the local diagram's start state means "no such instance", so
 	// leaving it creates one and entering it deletes one.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 [*] --> running
@@ -78,7 +89,7 @@ open --> none : CLOSE
 func TestExpandFramesTheOtherMapsAndKeepsTauSilent(t *testing.T) {
 	// Arrange: a global state with a second map, so that every promoted edge
 	// has something to leave alone.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 running : audits ; 監査ID ⇸ Audit
@@ -138,7 +149,7 @@ frozen --> open : tau
 func TestExpandCopiesThePromotionIntoEveryStateOfTheInClause(t *testing.T) {
 	// Arrange: the same map is driven in two operating modes, and the edge that
 	// switches between them is hand-written.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 state "縮退中" as degraded
@@ -351,7 +362,7 @@ sync OPEN : accounts(口座ID), audits(監査ID)
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			got := diagnosticsOf(t, csdf.MustParse(tc.Global), stubLoader(tc.Sources), promote.SeverityError)
+			got := diagnosticsOf(t, mustParseGlobal(tc.Global), stubLoader(tc.Sources), promote.SeverityError)
 			if diff := cmp.Diff(tc.Want, got); diff != "" {
 				t.Errorf("errors mismatch (-want +got):\n%s", diff)
 			}
@@ -362,7 +373,7 @@ sync OPEN : accounts(口座ID), audits(監査ID)
 func TestExpandMergesSyncedEdges(t *testing.T) {
 	// Arrange: booking a buy trade and counting it into the segregation report
 	// is one event, so the two instances must take it together.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : buys ; 約定ID ⇸ Buy
 running : cycles ; 基準日 ⇸ Cycle
@@ -427,7 +438,7 @@ counting --> counting : BOOK(数量)
 func TestExpandConjoinsConstraints(t *testing.T) {
 	// Arrange: a checker may only approve while logged in, which is a fact
 	// about another map and so cannot be written in the local diagram.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 running : sessions ; 利用者 ⇸ Session
@@ -479,7 +490,7 @@ open --> frozen : FREEZE(理由)
 }
 
 func TestExpandReportsAConstraintThatMatchesNothing(t *testing.T) {
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts
 [*] --> running
@@ -596,7 +607,7 @@ none --> open : OPEN
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			global := csdf.MustParse(tc.Global)
+			global := mustParseGlobal(tc.Global)
 			load := stubLoader(tc.Sources)
 			if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
 				t.Fatalf("Expand() reported errors: %v", got)
@@ -611,7 +622,7 @@ none --> open : OPEN
 func TestExpandReadsBackAFrozenMap(t *testing.T) {
 	// Arrange: the map is a state variable of both states, but the promotion
 	// only drives it in one, so it is frozen in the other.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 state "保守中" as maintenance
@@ -651,7 +662,7 @@ func TestExpandWithTemplates(t *testing.T) {
 		t.Fatalf("ParseTemplates() = _, %v; want no error", err)
 	}
 
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts ; 口座ID ⇸ Account
 running : audits ; 監査ID ⇸ Audit
@@ -719,7 +730,7 @@ none --> one : E
 one --> many : E
 @enduml
 `
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : xs
 running : ys
@@ -760,7 +771,7 @@ sync E : xs(x), ys(y)
 func TestExpandRefusesToSyncAMapWithItself(t *testing.T) {
 	// Arrange: two instances of one map cannot take an event together, because
 	// one edge cannot say twice what the map becomes.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts
 [*] --> running
@@ -785,7 +796,7 @@ none --> open : TRANSFER
 func TestExpandRefusesToSyncTau(t *testing.T) {
 	// Arrange: an internal event is by definition not shared, and a synced one
 	// would have to carry the instance ids as arguments.
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts
 [*] --> running
@@ -816,7 +827,7 @@ func TestExpandReportsATemplateThatCannotRender(t *testing.T) {
 		t.Fatalf("ParseTemplates() = _, %v; want no error", err)
 	}
 
-	global := csdf.MustParse(`@startuml
+	global := mustParseGlobal(`@startuml
 state "稼働中" as running
 running : accounts
 [*] --> running

@@ -221,3 +221,27 @@ promote local/ACCOUNT.puml as Account via accounts(口座ID)
 		t.Errorf("ParseBytesAllowingDirectives() = _, %v; want no error", err)
 	}
 }
+
+func TestParseRejectsDirectives(t *testing.T) {
+	// A diagram read as text reaches the same analyses as one read as bytes, so
+	// it is refused on the same grounds.
+	input := `@startuml
+state "running" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`
+
+	_, err := Parse(input)
+	if err == nil {
+		t.Fatalf("Parse() = _, nil; want an error")
+	}
+	if !strings.Contains(err.Error(), "csdfpromote") {
+		t.Errorf("Parse() error = %q; want it to name csdfpromote", err)
+	}
+
+	if _, err := ParseAllowingDirectives(input); err != nil {
+		t.Errorf("ParseAllowingDirectives() = _, %v; want no error", err)
+	}
+}

@@ -41,7 +41,22 @@ func ParseBytesAllowingDirectives(content []byte) (*Diagram, error) {
 	return diagram, nil
 }
 
+// Parse parses a Composable State Diagram from PlantUML text. Like ParseBytes,
+// it rejects a diagram that still carries promotion directives.
 func Parse(content string) (*Diagram, error) {
+	diagram, err := ParseAllowingDirectives(content)
+	if err != nil {
+		return nil, err
+	}
+	if diagram.HasDirectives() {
+		return nil, fmt.Errorf("csdf.Parse: %w", ErrDirectives)
+	}
+	return diagram, nil
+}
+
+// ParseAllowingDirectives is Parse without that rejection. Only csdfpromote,
+// which consumes the directives, may use it.
+func ParseAllowingDirectives(content string) (*Diagram, error) {
 	diagram, err := NewParser(content).Parse()
 	if err != nil {
 		return nil, fmt.Errorf("csdf.Parse: parse: %w", err)
