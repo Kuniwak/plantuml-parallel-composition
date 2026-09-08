@@ -186,6 +186,28 @@ accNone --> accOpen : OPEN
 `},
 			want: `error: line 5: local/ACCOUNT.puml has an edge from its start state "accNone" back to itself, which is an event of an instance that does not exist`,
 		},
+		"a local diagram that creates an instance on tau": {
+			global: `@startuml A
+state "稼働中" as running {
+  running : accounts ; 口座ID ⇸ Account
+
+  state "accounts : 口座ID ⇸ Account" as a1 <<promote>> {
+    !include local/ACCOUNT.puml
+  }
+}
+[*] --> running
+@enduml
+`,
+			locals: map[string]string{"local/ACCOUNT.puml": `@startuml ACCOUNT
+state "未開設" as accNone
+state "開設済み" as accOpen
+[*] --> accNone
+accNone --> accOpen : tau
+accOpen --> accNone : CLOSE
+@enduml
+`},
+			want: `error: line 5: local/ACCOUNT.puml creates an instance on tau, whose instance is only existentially quantified, so nothing stops instances from appearing`,
+		},
 		"two local diagrams that share a state ID": {
 			global: `@startuml A
 state "稼働中" as running {

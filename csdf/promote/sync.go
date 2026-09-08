@@ -32,17 +32,36 @@ func (e *expander) planSyncs() {
 
 		ok := true
 		var states []csdf.StateID
+		named := map[csdf.Var]bool{}
 		for i, t := range s.Targets {
+			// One edge updates one key of one map. Two targets on one map would
+			// put two assignments to that map in one post, which no state can
+			// satisfy unless the two IDs are equal.
+			if named[t.Map] {
+				e.errorf(s.Line, "this sync names %q twice; one event cannot move two instances of one map at once", t.Map)
+				ok = false
+				continue
+			}
+			named[t.Map] = true
+
 			in := e.statesOf(t.Map)
 			if len(in) == 0 {
 				e.errorf(s.Line, "%q is not promoted anywhere", t.Map)
 				ok = false
 				continue
 			}
-			if len(edgesOn(e.locals[t.Map], s.Event)) == 0 {
+			edges := edgesOn(e.locals[t.Map], s.Event)
+			if len(edges) == 0 {
 				e.errorf(s.Line, "%s has no edge on %q", e.paths[t.Map], s.Event)
 				ok = false
 				continue
+			}
+			// Every combination of the sides becomes one merged event, so sides
+			// that disagree on their arguments make the merged event's arity
+			// depend on which combination it is - and a constrain matches on
+			// arity.
+			if !sameArguments(edges) {
+				e.warnf(s.Line, "the edges of %q on %q do not all take the same arguments, so the merged event does not either", t.Map, s.Event)
 			}
 			if i == 0 {
 				states = in
@@ -137,6 +156,11 @@ func (e *expander) constrain(edges []ExpandedEdge) {
 				continue
 			}
 			matched++
+			for _, param := range c.Params {
+				if !slices.Contains(args, param) {
+					e.warnf(c.Line, "%s has no argument named %q; the guard says nothing about it", edges[i].Edge.Event, param)
+				}
+			}
 
 			guard := edges[i].Edge.Guard
 			if csdf.IsTrue(guard) {
@@ -181,6 +205,17 @@ func edgesOn(local *csdf.Diagram, event string) []csdf.Edge {
 		}
 	}
 	return edges
+}
+
+// sameArguments reports whether every edge takes the same argument list.
+func sameArguments(edges []csdf.Edge) bool {
+	_, first := splitEvent(edges[0].Event)
+	for _, edge := range edges[1:] {
+		if _, args := splitEvent(edge.Event); !slices.Equal(args, first) {
+			return false
+		}
+	}
+	return true
 }
 
 // product returns every way of choosing one edge from each side.

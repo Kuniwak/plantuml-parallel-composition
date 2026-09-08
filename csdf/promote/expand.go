@@ -83,6 +83,7 @@ func Expand(g *GlobalDiagram, load LoadFunc, templates *Templates) (*Expansion, 
 		locals:    map[csdf.Var]*csdf.Diagram{},
 		paths:     map[csdf.Var]string{},
 		owned:     map[ownership]bool{},
+		diags:     append([]Diagnostic{}, g.Diagnostics...),
 	}
 	return e.run()
 }

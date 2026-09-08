@@ -41,10 +41,11 @@ func ParseGlobal(source string) (*GlobalDiagram, error) {
 	}
 
 	return &GlobalDiagram{
-		Core:       core,
-		Promotes:   s.promotes,
-		Syncs:      s.syncs,
-		Constrains: s.constrains,
+		Core:        core,
+		Promotes:    s.promotes,
+		Syncs:       s.syncs,
+		Constrains:  s.constrains,
+		Diagnostics: s.diags,
 	}, nil
 }
 
@@ -57,6 +58,7 @@ type scanner struct {
 	promotes   []Promote
 	syncs      []Sync
 	constrains []Constrain
+	diags      []Diagnostic
 
 	// parent is the composite state the scanner is inside, empty at the top
 	// level. Only one level is allowed, so this is a name rather than a stack.
@@ -93,7 +95,7 @@ func (s *scanner) run() error {
 			i = n
 
 		case strings.HasPrefix(text, "!"):
-			s.blank(1)
+			s.readPreprocessor(i)
 			i++
 
 		default:
@@ -145,7 +147,7 @@ func (s *scanner) readComposite(i int) (int, error) {
 			}
 			i = n
 		case strings.HasPrefix(text, "!"):
-			s.blank(1)
+			s.readPreprocessor(i)
 			i++
 		default:
 			s.out = append(s.out, s.lines[i])
@@ -209,6 +211,20 @@ func (s *scanner) readPromote(i int) (int, error) {
 	return end + 1, nil
 }
 
+// readPreprocessor drops a PlantUML preprocessor line. An !include here is not
+// inside a <<promote>> block, so it names no local diagram; that is worth
+// saying, because it is what a first attempt at a promotion looks like.
+func (s *scanner) readPreprocessor(i int) {
+	if includeRe.MatchString(strings.TrimSpace(s.lines[i])) {
+		s.diags = append(s.diags, Diagnostic{
+			Severity: SeverityInfo,
+			Line:     i + 1,
+			Message:  "this !include is not inside a <<promote>> block, so it names no local diagram and is dropped",
+		})
+	}
+	s.blank(1)
+}
+
 // blank writes n empty lines, standing in for the source lines just consumed.
 func (s *scanner) blank(n int) {
 	for range n {
@@ -245,15 +261,27 @@ func (s *scanner) readNote(i int) (int, error) {
 		return 0, fmt.Errorf("line %d: unterminated note", open)
 	}
 
+	read := false
 	for body := i + 1; body < end; body++ {
 		line := strings.TrimSpace(s.lines[body])
 		if line == "" {
 			continue
 		}
-		if err := s.readDirective(line, anchor, body+1); err != nil {
-			return 0, err
+		if !read {
+			if err := s.readDirective(line, anchor, body+1); err != nil {
+				return 0, err
+			}
+			read = len(s.syncs)+len(s.constrains) > 0
+			if !read {
+				// A note that is not a directive is there for the picture, and
+				// the rest of it is prose.
+				break
+			}
+			continue
 		}
-		break
+		if isDirective(line) {
+			return 0, fmt.Errorf("line %d: this note holds a second directive; write one note per directive", body+1)
+		}
 	}
 
 	s.blank(end - i + 1)
@@ -264,7 +292,7 @@ func (s *scanner) readNote(i int) (int, error) {
 // directive is a note the author wrote for the reader, so it is left alone.
 func (s *scanner) readDirective(line string, anchor Anchor, at int) error {
 	switch {
-	case strings.HasPrefix(line, "sync"):
+	case strings.HasPrefix(line, "sync "):
 		m := syncBodyRe.FindStringSubmatch(line)
 		if m == nil {
 			return fmt.Errorf("line %d: expected \"sync <event> : <map>(<param>), ...\", got %q", at, line)
@@ -275,7 +303,7 @@ func (s *scanner) readDirective(line string, anchor Anchor, at int) error {
 		}
 		s.syncs = append(s.syncs, Sync{Anchor: anchor, Event: m[1], Targets: targets, Line: at})
 
-	case strings.HasPrefix(line, "constrain"):
+	case strings.HasPrefix(line, "constrain "):
 		m := constrainBodyRe.FindStringSubmatch(line)
 		if m == nil {
 			return fmt.Errorf("line %d: expected \"constrain <event>(<param>, ...) ; <guard>\", got %q", at, line)
@@ -287,8 +315,29 @@ func (s *scanner) readDirective(line string, anchor Anchor, at int) error {
 			Guard:  csdf.Predicate(strings.TrimSpace(m[3])),
 			Line:   at,
 		})
+
+	default:
+		// A note that is not a directive is there for the picture. One whose
+		// first word is a directive's name in another case is a typo, though,
+		// and silently drawing it is the worst of the two readings.
+		if word := firstWord(line); word != "" && isDirective(strings.ToLower(word)+" ") {
+			s.diags = append(s.diags, Diagnostic{
+				Severity: SeverityWarning,
+				Line:     at,
+				Message:  fmt.Sprintf("this note starts with %q, which is not a directive; write %q to make it one", word, strings.ToLower(word)),
+			})
+		}
 	}
 	return nil
+}
+
+// isDirective reports whether a note line opens a directive.
+func isDirective(line string) bool {
+	return strings.HasPrefix(line, "sync ") || strings.HasPrefix(line, "constrain ")
+}
+
+func firstWord(line string) string {
+	return strings.Fields(line)[0]
 }
 
 func parseMapRefs(s string, at int) ([]MapRef, error) {

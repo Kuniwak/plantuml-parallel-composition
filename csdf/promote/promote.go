@@ -18,6 +18,10 @@ type GlobalDiagram struct {
 	Promotes   []Promote     `json:"promotes"`
 	Syncs      []Sync        `json:"syncs"`
 	Constrains []Constrain   `json:"constrains"`
+	// Diagnostics is what reading the source had to say, which is nothing that
+	// stops the parse: a stray !include, a note whose first word looks like a
+	// directive misspelled.
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 // Promote is one <<promote>> block: the family of instances that the map holds,

@@ -59,6 +59,33 @@ end note
 			global: strings.Replace(syncGlobal, `running : buys ; 約定ID ⇸ Buy`, `running : buys ; 約定ID ⇸ Sell`, 1),
 			want:   `warning: line 6: "buys" is promoted as "Buy" but its state variable is written "約定ID ⇸ Sell"`,
 		},
+		"a constrain argument no matching edge has": {
+			global: strings.Replace(syncGlobal, "@enduml", `note as c1
+  constrain BUY(約定ID, zzz) ; zzz は最小取引単位の倍数である
+end note
+@enduml`, 1),
+			want: `warning: line 20: BUY(約定ID, 数量) has no argument named "zzz"; the guard says nothing about it`,
+		},
+		"a sync whose sides carry different arities": {
+			global: syncGlobal,
+			locals: withLocal(syncLocals, "local/CYCLE.puml", `@startuml CYCLE
+state "未開始" as cycIdle
+state "集計中" as cycCounting
+[*] --> cycIdle
+cycIdle --> cycCounting : BOOK
+cycCounting --> cycCounting : BOOK(数量)
+@enduml
+`),
+			want: `warning: line 17: the edges of "cycles" on "BOOK" do not all take the same arguments, so the merged event does not either`,
+		},
+		"an !include outside a <<promote>> block": {
+			global: strings.Replace(syncGlobal, "[*] --> running", "!include local/BUY.puml\n[*] --> running", 1),
+			want:   `info: line 14: this !include is not inside a <<promote>> block, so it names no local diagram and is dropped`,
+		},
+		"a directive whose name is not spelled as one": {
+			global: strings.Replace(syncGlobal, "  sync BOOK :", "  Sync BOOK :", 1),
+			want:   `warning: line 17: this note starts with "Sync", which is not a directive; write "sync" to make it one`,
+		},
 		"a map that is frozen in a state": {
 			global: strings.Replace(syncGlobal, "@enduml", `state "保守中" as maintenance
 maintenance : buys ; 約定ID ⇸ Buy

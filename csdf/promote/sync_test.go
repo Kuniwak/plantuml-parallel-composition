@@ -126,6 +126,10 @@ func TestExpandRefusesADirectiveThatCannotMeanAnything(t *testing.T) {
 			global: strings.Replace(syncGlobal, "sync BOOK : buys(約定ID), cycles(基準日)", "sync tau : buys(約定ID), cycles(基準日)", 1),
 			want:   `error: line 17: tau cannot be synced; an internal event two families take together is an observable one`,
 		},
+		"a sync that names one map twice": {
+			global: strings.Replace(syncGlobal, "sync BOOK : buys(約定ID), cycles(基準日)", "sync BOOK : buys(約定ID), buys(約定ID2)", 1),
+			want:   `error: line 17: this sync names "buys" twice; one event cannot move two instances of one map at once`,
+		},
 		"a constrain that matches no edge": {
 			global: strings.Replace(syncGlobal, "@enduml", `note as c1
   constrain BUY(約定ID) ; 数量 は最小取引単位の倍数である

@@ -120,6 +120,16 @@ func (e *expander) checkLocals() {
 				break
 			}
 		}
+		for _, edge := range local.Edges {
+			// A promoted tau carries no instance ID, so its instance is only
+			// existentially quantified. On a creation edge that leaves the guard
+			// saying "some ID is not in the map yet", which is true as long as
+			// there are IDs left: instances would appear out of nothing.
+			if edge.Src == absent && edge.Event == csdf.Tau {
+				e.errorf(p.Line, "%s creates an instance on tau, whose instance is only existentially quantified, so nothing stops instances from appearing", p.Path)
+				break
+			}
+		}
 
 		for _, s := range csdf.SortedStates(local.States) {
 			if other, ok := declaredIn[s.ID]; ok {

@@ -249,6 +249,20 @@ end note
 `,
 			want: `line 7: expected "constrain <event>(<param>, ...) ; <guard>", got "constrain BUY(約定ID)"`,
 		},
+		"two directives in one note": {
+			source: `@startuml A
+state "稼働中" as running {
+  running : accounts
+}
+[*] --> running
+note as n1
+  sync BOOK : accounts(口座ID)
+  constrain BUY(口座ID) ; true
+end note
+@enduml
+`,
+			want: `line 8: this note holds a second directive; write one note per directive`,
+		},
 		"an unterminated note": {
 			source: `@startuml A
 state "稼働中" as running {
