@@ -375,6 +375,8 @@ examples/promote/           golden test の入力と期待出力、日本語テ�
 
 core への変更は「ヒント付きエラー」だけに限定する。ヒントは `csdf` のパースエラーに文脈として付けるので、全 CLI に自動で効く。
 
+**実装での訂正**：core にもう 1 つだけ足した。`csdf.Diagram.StringWithEdgeComments(before func(int) string)` で、エッジの直前に差し込む行を呼び出し側が決められるようにする。文法には触れず、`String()` はこれを nil で呼ぶだけになる。これを足さないと promote 側が core の印字を丸ごと写すことになり、コメント自身が「keep the two in step」と書くような乖離の種を残す。あわせて `tools.UserFacing`（自分の文面が読み手向けだと言うエラーで unwrap を止める規則）を足した。
+
 ## 7. テスト
 
 1. **上位互換パーサ**：§2.3 の受理・拒否（`<<promote>>` の中身が複数行、一般の階層状態、`as` 別名と見出しの不一致、note 本文の構文エラー、preprocessor 行の読み飛ばし）。core の既存 golden test がすべて通ること（core は無変更なので通るはず。ヒント付きエラーのメッセージ変更分だけ期待値を更新）。
