@@ -43,23 +43,27 @@ buyBooked --> buyNone : BOOK(数量) ; true ; 数量は 0
   sync BOOK : buys(約定ID), cycles(基準日)
 end note
 `, "", 1),
-			want: `warning: local/BUY.puml and local/CYCLE.puml both have an edge on "BOOK", which is not synced; each family takes it on its own`,
+			locals: syncLocals,
+			want:   `warning: local/BUY.puml and local/CYCLE.puml both have an edge on "BOOK", which is not synced; each family takes it on its own`,
 		},
 		"a note pointing at a map it does not mention": {
 			global: strings.Replace(syncGlobal, `note as sync1
   sync BOOK : buys(約定ID), cycles(基準日)`, `note bottom of runningCycles
   sync BOOK : buys(約定ID)`, 1),
-			want: `warning: line 17: this note points at "runningCycles", which is not a block of any map it names`,
+			locals: syncLocals,
+			want:   `warning: line 17: this note points at "runningCycles", which is not a block of any map it names`,
 		},
 		"a constrain guard that names no argument": {
 			global: strings.Replace(syncGlobal, "@enduml", `note as c1
   constrain BUY(約定ID, 数量) ; 相場は開いている
 end note
 @enduml`, 1),
-			want: `warning: line 20: the guard of this constrain names none of its arguments, so it says nothing about the instance`,
+			locals: syncLocals,
+			want:   `warning: line 20: the guard of this constrain names none of its arguments, so it says nothing about the instance`,
 		},
 		"a type the state variable does not mention": {
 			global: strings.Replace(syncGlobal, `running : buys ; 約定ID ⇸ Buy`, `running : buys ; 約定ID ⇸ Sell`, 1),
+			locals: syncLocals,
 			want:   `warning: line 6: "buys" is promoted as "Buy" but its state variable is written "約定ID ⇸ Sell"`,
 		},
 		// BOOK is merged from two combinations, so the directive matches two
@@ -87,10 +91,12 @@ cycCounting --> cycCounting : BOOK(数量)
 		},
 		"an !include outside a <<promote>> block": {
 			global: strings.Replace(syncGlobal, "[*] --> running", "!include local/BUY.puml\n[*] --> running", 1),
+			locals: syncLocals,
 			want:   `info: line 14: this !include is not inside a <<promote>> block, so it names no local diagram and is dropped`,
 		},
 		"a directive whose name is not spelled as one": {
 			global: strings.Replace(syncGlobal, "  sync BOOK :", "  Sync BOOK :", 1),
+			locals: syncLocals,
 			want:   `warning: line 17: this note starts with "Sync", which is not a directive; write "sync" to make it one`,
 		},
 		"a map that is frozen in a state": {
@@ -99,18 +105,14 @@ maintenance : buys ; 約定ID ⇸ Buy
 maintenance : cycles ; 基準日 ⇸ Cycle
 running --> maintenance : MAINT ; true ; buys' = buys ∧ cycles' = cycles
 @enduml`, 1),
-			want: `info: state "maintenance" holds "buys" but has no <<promote>> block for it, so the family is frozen there`,
+			locals: syncLocals,
+			want:   `info: state "maintenance" holds "buys" but has no <<promote>> block for it, so the family is frozen there`,
 		},
 	}
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			locals := c.locals
-			if locals == nil {
-				locals = syncLocals
-			}
-
-			x, diags := expand(t, c.global, locals)
+			x, diags := expand(t, c.global, c.locals)
 			if x == nil {
 				t.Fatalf("promote.Expand() expansion = nil; a warning must not stop it: %v", diags)
 			}

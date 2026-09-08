@@ -18,7 +18,10 @@ func TestExpandRendersTheClausesWithTheGivenTemplates(t *testing.T) {
 		t.Fatalf("promote.ParseGlobal() error = %v", err)
 	}
 
-	x, _ := promote.Expand(g, promote.MapLoader(syncLocals), tmpl)
+	x, diags := promote.Expand(g, promote.MapLoader(syncLocals), tmpl)
+	if x == nil {
+		t.Fatalf("promote.Expand() expansion = nil, diagnostics = %v", diags)
+	}
 
 	want := "running --> running : SETTLE(約定ID) ; 約定ID は buys にある、buys の 約定ID は〈記帳済み〉 ; buys から 約定ID を除く、cycles は変わらない"
 	if got := x.String(); !strings.Contains(got, want) {

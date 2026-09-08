@@ -47,11 +47,8 @@ func NewMainFunc() cli.MainFunc[*Options] {
 		}
 		// An error leaves the diagram unprinted, so an unsound expansion never
 		// reaches the tools downstream.
-		if promote.HasError(diags) {
-			return fmt.Errorf("the promotion has errors")
-		}
-		if opts.Werror && promote.HasSeverity(diags, promote.SeverityWarning) {
-			return fmt.Errorf("the promotion has warnings and -Werror is set")
+		if err := promote.Refusal(diags, opts.Werror); err != nil {
+			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 		if opts.LintOnly {
 			return nil

@@ -1,7 +1,9 @@
 package promote
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -158,6 +160,20 @@ func (e *expander) errorf(line int, format string, args ...any) {
 	e.diags = append(e.diags, Diagnostic{Severity: SeverityError, Line: line, Message: fmt.Sprintf(format, args...)})
 }
 
+// Refusal returns why a run of the expansion should fail, or nil when it should
+// not. An error leaves the diagram unprinted; werror says whether a warning does
+// too. The policy lives here rather than in the CLI so that any other front end
+// refuses the same diagrams.
+func Refusal(diags []Diagnostic, werror bool) error {
+	if HasError(diags) {
+		return errors.New("the promotion has errors")
+	}
+	if werror && HasSeverity(diags, SeverityWarning) {
+		return errors.New("the promotion has warnings and -Werror is set")
+	}
+	return nil
+}
+
 // HasError reports whether any diagnostic leaves the diagram unprintable.
 func HasError(diags []Diagnostic) bool { return HasSeverity(diags, SeverityError) }
 
@@ -169,10 +185,20 @@ func HasSeverity(diags []Diagnostic, s Severity) bool {
 
 // sorted returns the diagnostics by source line, so that reading them follows
 // reading the file. The checks run in an order of their own, and one of them
-// ranges over a map.
+// ranges over a map. The ones about no line in particular go last, after
+// everything a reader can point at.
 func (e *expander) sorted() []Diagnostic {
-	slices.SortStableFunc(e.diags, func(a, b Diagnostic) int { return a.Line - b.Line })
+	slices.SortStableFunc(e.diags, func(a, b Diagnostic) int {
+		return lineOrder(a.Line) - lineOrder(b.Line)
+	})
 	return e.diags
+}
+
+func lineOrder(line int) int {
+	if line == 0 {
+		return math.MaxInt32
+	}
+	return line
 }
 
 // warn reports what is probably not meant. None of it stops the expansion: the
@@ -278,7 +304,7 @@ func (e *expander) warnAboutFrozenMaps() {
 			if !promoted[v.Name] {
 				continue
 			}
-			if e.blockOf(v.Name, state.ID).Map != "" {
+			if _, ok := e.blockOf(v.Name, state.ID); ok {
 				continue
 			}
 			e.infof("state %q holds %q but has no <<promote>> block for it, so the family is frozen there", state.ID, v.Name)

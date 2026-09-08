@@ -1,6 +1,11 @@
 package tools
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/Kuniwak/puml-parallel/csdf"
+)
 
 // UserFacing is implemented by an error whose own message is the one to show.
 // Unwrapping stops there: it has already been written for the reader, and going
@@ -23,12 +28,23 @@ func UserFacingError(err error, debug bool) string {
 	}
 	for {
 		if _, ok := err.(UserFacing); ok {
-			return err.Error()
+			return withPromotionAdvice(err)
 		}
 		unwrapped := errors.Unwrap(err)
 		if unwrapped == nil {
-			return err.Error()
+			return withPromotionAdvice(err)
 		}
 		err = unwrapped
 	}
+}
+
+// withPromotionAdvice names the tool that expands a promotion. csdf reports the
+// fact - the source still holds directives - and which command to run is this
+// layer's to know.
+func withPromotionAdvice(err error) string {
+	var hinted *csdf.PromotionHintError
+	if errors.As(err, &hinted) {
+		return fmt.Sprintf("%s; run csdfpromote on it first", err)
+	}
+	return err.Error()
 }

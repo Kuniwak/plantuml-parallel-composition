@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -24,7 +23,9 @@ func TestLoadDiagramReadsPlantUMLPNG(t *testing.T) {
 	}
 }
 
-func TestParseHintsAtCsdfpromoteWhenTheSourceStillHoldsDirectives(t *testing.T) {
+// The parse error says the fact; naming the tool that expands a promotion is the
+// tool layer's job (tools.UserFacingError).
+func TestParseReportsThatTheSourceStillHoldsDirectives(t *testing.T) {
 	cases := map[string]string{
 		"a <<promote>> block": `@startuml A
 state "稼働中" as running {
@@ -53,14 +54,15 @@ end note
 			if err == nil {
 				t.Fatal("Parse() error = nil, want a parse error")
 			}
-			if !strings.Contains(err.Error(), "csdfpromote") {
-				t.Errorf("Parse() error = %q, want it to name csdfpromote", err)
+			var hinted *PromotionHintError
+			if !errors.As(err, &hinted) {
+				t.Errorf("Parse() error = %q, want a *PromotionHintError in the chain", err)
 			}
 		})
 	}
 }
 
-func TestParseDoesNotHintAtCsdfpromoteForAnOrdinaryMistake(t *testing.T) {
+func TestParseDoesNotReportDirectivesForAnOrdinaryMistake(t *testing.T) {
 	cases := map[string]string{
 		"a malformed edge": `@startuml A
 state "稼働中" as running
@@ -98,8 +100,9 @@ end note
 			if err == nil {
 				t.Fatal("Parse() error = nil, want a parse error")
 			}
-			if strings.Contains(err.Error(), "csdfpromote") {
-				t.Errorf("Parse() error = %q, want it not to name csdfpromote", err)
+			var hinted *PromotionHintError
+			if errors.As(err, &hinted) {
+				t.Errorf("Parse() error = %q, want no *PromotionHintError in the chain", err)
 			}
 		})
 	}

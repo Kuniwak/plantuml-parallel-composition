@@ -25,10 +25,13 @@ var (
 
 // PromotionHintError is a parse error on a source that still holds promotion
 // directives. It wraps the parse error, so a caller can still reach it.
+//
+// It says the fact and not what to run: which tool expands a promotion is the
+// tool layer's business, and this package is the grammar.
 type PromotionHintError struct{ err error }
 
 func (e *PromotionHintError) Error() string {
-	return e.err.Error() + ": the source holds promotion directives; run csdfpromote on it first"
+	return e.err.Error() + ": the source holds promotion directives, so its edges are not the whole of its behaviour"
 }
 
 func (e *PromotionHintError) Unwrap() error { return e.err }

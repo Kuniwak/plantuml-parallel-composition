@@ -77,7 +77,10 @@ func TestExpandMergesTheSyncedEdges(t *testing.T) {
 }
 
 func TestExpandPromotesTauWithoutAnInstanceID(t *testing.T) {
-	x, _ := expand(t, syncGlobal, syncLocals)
+	x, diags := expand(t, syncGlobal, syncLocals)
+	if x == nil {
+		t.Fatalf("promote.Expand() expansion = nil, diagnostics = %v", diags)
+	}
 
 	want := "running --> running : tau ; 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈集計中〉 ; cycles' = cycles ⊕ {基準日 ↦ 〈確定済み〉} ∧ buys' = buys"
 	if got := x.String(); !strings.Contains(got, want) {

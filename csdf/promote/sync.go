@@ -80,7 +80,11 @@ func (e *expander) planSyncs() {
 		plan.states = states
 		for _, g := range states {
 			for _, t := range s.Targets {
-				plan.blocks[g] = append(plan.blocks[g], e.blockOf(t.Map, g))
+				block, ok := e.blockOf(t.Map, g)
+				if !ok {
+					panic(fmt.Errorf("promote: %q has no block in %q, which is in the intersection of the sync's states", t.Map, g))
+				}
+				plan.blocks[g] = append(plan.blocks[g], block)
 			}
 		}
 		e.plans = append(e.plans, plan)
@@ -191,14 +195,14 @@ func (e *expander) statesOf(m csdf.Var) []csdf.StateID {
 	return states
 }
 
-// blockOf returns the block that promotes m in state g.
-func (e *expander) blockOf(m csdf.Var, g csdf.StateID) Promote {
+// blockOf returns the block that promotes m in state g, if there is one.
+func (e *expander) blockOf(m csdf.Var, g csdf.StateID) (Promote, bool) {
 	for _, p := range e.global.Promotes {
 		if p.Map == m && p.In == g {
-			return p
+			return p, true
 		}
 	}
-	return Promote{}
+	return Promote{}, false
 }
 
 // edgesOn returns the local edges carrying the named event, in source order.
