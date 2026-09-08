@@ -154,3 +154,37 @@ s0 --> s1 : d ; g ; p
 		t.Error(diff)
 	}
 }
+
+func TestStringWithEdgeComments(t *testing.T) {
+	// Arrange: a generated diagram says where each of its edges came from, so
+	// that a reader can find the source the predicate was written in.
+	d := MustParse(`@startuml
+state "A" as a
+state "B" as b
+[*] --> a
+a --> b : go
+b --> a : back
+@enduml
+`)
+
+	// Act
+	got := d.StringWithEdgeComments([]string{"promote: LOCAL.puml 〈A〉 → 〈B〉", ""})
+
+	// Assert
+	want := `@startuml
+state "A" as a
+state "B" as b
+[*] --> a
+' promote: LOCAL.puml 〈A〉 → 〈B〉
+a --> b : go
+b --> a : back
+@enduml
+`
+	if got != want {
+		t.Errorf("StringWithEdgeComments() =\n%s\nwant:\n%s", got, want)
+	}
+
+	if d.String() != d.StringWithEdgeComments(nil) {
+		t.Errorf("String() and StringWithEdgeComments(nil) disagree")
+	}
+}

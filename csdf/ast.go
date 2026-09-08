@@ -183,6 +183,14 @@ func (d *Diagram) Clone() *Diagram {
 }
 
 func (d *Diagram) String() string {
+	return d.StringWithEdgeComments(nil)
+}
+
+// StringWithEdgeComments is String with a PlantUML line comment printed before
+// an edge, taken from comments at the index of the edge. An empty entry, and an
+// index past the end of comments, print no comment. A generated diagram uses it
+// to record where each of its edges came from.
+func (d *Diagram) StringWithEdgeComments(comments []string) string {
 	var sb strings.Builder
 	if d.Name == "" {
 		sb.WriteString("@startuml\n")
@@ -211,7 +219,10 @@ func (d *Diagram) String() string {
 	}
 
 	// Regular edges
-	for _, edge := range d.Edges {
+	for i, edge := range d.Edges {
+		if i < len(comments) && comments[i] != "" {
+			sb.WriteString(fmt.Sprintf("' %s\n", comments[i]))
+		}
 		sb.WriteString(fmt.Sprintf("%s --> %s : %s", edge.Src, edge.Dst, edge.Event))
 		// A lone "; x" is a guard (docs/SYNTAX.md), so an edge that only has a
 		// post must spell the omitted guard out as "; true ; x".
