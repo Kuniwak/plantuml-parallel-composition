@@ -140,7 +140,7 @@ func (e *expander) constrain(out *csdf.Diagram, origins []string) {
 				out.Edges[i].Guard = c.Guard
 				continue
 			}
-			out.Edges[i].Guard = guard + " ∧ " + c.Guard
+			out.Edges[i].Guard = csdf.Predicate(e.templates.join([]string{string(guard), string(c.Guard)}))
 		}
 		if matched == 0 {
 			e.errorf(c.Line, "no expanded edge is %q with %d argument%s", c.Event, len(c.Params), plural(len(c.Params)))

@@ -32,7 +32,16 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return nil
 		}
 
-		expansion, diags, err := promote.Expand(global, promote.FileLoader(opts.Base))
+		var expandOpts []promote.Option
+		if opts.Template != "" {
+			templates, err := promote.LoadTemplates(opts.Template)
+			if err != nil {
+				return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
+			}
+			expandOpts = append(expandOpts, promote.WithTemplates(templates))
+		}
+
+		expansion, diags, err := promote.Expand(global, promote.FileLoader(opts.Base), expandOpts...)
 		if err != nil {
 			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}

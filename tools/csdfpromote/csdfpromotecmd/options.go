@@ -15,6 +15,7 @@ type Options struct {
 	// Base is what an !include path is resolved against: the directory the
 	// input was read from, or the working directory when it came from stdin.
 	Base       string
+	Template   string
 	NoComments bool
 	Werror     bool
 	LintOnly   bool
@@ -47,6 +48,7 @@ Options:
 Examples:
   $ csdfpromote path/to/GLOBAL.puml
   $ csdfpromote -lint-only -Werror path/to/GLOBAL.puml
+  $ csdfpromote -template examples/promote/templates/ja.tmpl path/to/GLOBAL.puml
   $ csdfpromote path/to/GLOBAL.puml | csdflivelockfree -
 `)
 		}
@@ -54,6 +56,7 @@ Examples:
 		var commonRawOpts tools.CommonRawOptions
 		tools.DeclareCommonOptions(flags, &commonRawOpts)
 		base := flags.String("base", "", "directory to resolve !include paths against (default: the directory of the input file)")
+		templatePath := flags.String("template", "", "file replacing the wording of the generated clauses (default: symbolic)")
 		noComments := flags.Bool("no-comments", false, "omit the line comment that says where each generated edge came from")
 		werror := flags.Bool("Werror", false, "treat warnings as errors")
 		lintOnly := flags.Bool("lint-only", false, "check the directives without printing the expansion")
@@ -90,6 +93,7 @@ Examples:
 		return &Options{
 			Common:     commonOpts,
 			Base:       resolved,
+			Template:   *templatePath,
 			NoComments: *noComments,
 			Werror:     *werror,
 			LintOnly:   *lintOnly,

@@ -129,3 +129,18 @@ func TestNewMainFuncVersion(t *testing.T) {
 		t.Error(diff)
 	}
 }
+
+func TestNewMainFuncRewordsWithATemplate(t *testing.T) {
+	cmdFunc := tools.NewCommandFunc(NewParseOptionsFunc(), NewMainFunc())
+	spy := cli.SpyProcInout()
+
+	exitStatus := cmdFunc([]string{"-template", "../../../examples/promote/templates/ja.tmpl", accountsPath}, spy.New())
+
+	if exitStatus != 0 {
+		t.Log(spy.Stderr.String())
+		t.Fatalf("want 0, got %d", exitStatus)
+	}
+	if !strings.Contains(spy.Stdout.String(), "口座ID は accounts にない") {
+		t.Errorf("want the Japanese wording, got:\n%s", spy.Stdout.String())
+	}
+}

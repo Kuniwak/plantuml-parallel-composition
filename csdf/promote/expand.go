@@ -67,15 +67,34 @@ type Expansion struct {
 // this shape is promoted by appending the instance ID as the only argument.
 var eventRe = regexp.MustCompile(`^([^()]+?)\s*\(\s*(.*?)\s*\)$`)
 
+// Option changes how an expansion is worded.
+type Option func(*expander)
+
+// WithTemplates replaces the wording of the generated clauses.
+func WithTemplates(t *Templates) Option {
+	return func(e *expander) { e.templates = t }
+}
+
 // Expand turns every promotion into edges on the state its block was written in.
-func Expand(g *GlobalDiagram, load LoadFunc) (*Expansion, []Diagnostic, error) {
-	e := &expander{global: g, load: load, locals: map[csdf.Var]*csdf.Diagram{}, paths: map[csdf.Var]string{}, owned: map[ownership]bool{}}
+func Expand(g *GlobalDiagram, load LoadFunc, opts ...Option) (*Expansion, []Diagnostic, error) {
+	e := &expander{
+		global:    g,
+		load:      load,
+		templates: DefaultTemplates(),
+		locals:    map[csdf.Var]*csdf.Diagram{},
+		paths:     map[csdf.Var]string{},
+		owned:     map[ownership]bool{},
+	}
+	for _, opt := range opts {
+		opt(e)
+	}
 	return e.run()
 }
 
 type expander struct {
-	global *GlobalDiagram
-	load   LoadFunc
+	global    *GlobalDiagram
+	load      LoadFunc
+	templates *Templates
 
 	locals map[csdf.Var]*csdf.Diagram
 	// paths is where each map's local diagram was read from. A block with no
@@ -150,22 +169,19 @@ func (e *expander) parts(p Promote, edge csdf.Edge, id string) edgeParts {
 	parts := edgeParts{src: src.Name, dst: dst.Name, id: id, tau: edge.Event == csdf.Tau}
 	parts.name, parts.args = splitEvent(edge.Event)
 
+	c := Clause{Map: string(p.Map), ID: id, Src: src.Name, Dst: dst.Name}
 	switch {
 	case edge.Src == absent: // Creation: the instance starts to exist.
-		parts.guard = append(parts.guard, fmt.Sprintf("%s ∉ dom %s", id, p.Map))
-		parts.post = append(parts.post, fmt.Sprintf("%s' = %s ∪ {%s ↦ 〈%s〉}", p.Map, p.Map, id, dst.Name))
+		parts.guard = append(parts.guard, e.templates.clause(clauseNotInDom, c))
+		parts.post = append(parts.post, e.templates.clause(clauseCreate, c))
 
 	case edge.Dst == absent: // Deletion: the instance stops existing.
-		parts.guard = append(parts.guard,
-			fmt.Sprintf("%s ∈ dom %s", id, p.Map),
-			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, id, src.Name))
-		parts.post = append(parts.post, fmt.Sprintf("%s' = {%s} ⩤ %s", p.Map, id, p.Map))
+		parts.guard = append(parts.guard, e.templates.clause(clauseInDom, c), e.templates.clause(clauseAtState, c))
+		parts.post = append(parts.post, e.templates.clause(clauseDelete, c))
 
 	default:
-		parts.guard = append(parts.guard,
-			fmt.Sprintf("%s ∈ dom %s", id, p.Map),
-			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, id, src.Name))
-		parts.post = append(parts.post, fmt.Sprintf("%s' = %s ⊕ {%s ↦ 〈%s〉}", p.Map, p.Map, id, dst.Name))
+		parts.guard = append(parts.guard, e.templates.clause(clauseInDom, c), e.templates.clause(clauseAtState, c))
+		parts.post = append(parts.post, e.templates.clause(clauseUpdate, c))
 	}
 
 	if !csdf.IsTrue(edge.Guard) {
@@ -212,8 +228,8 @@ func (e *expander) compose(g csdf.StateID, parts []edgeParts, moved ...csdf.Var)
 		Src:   g,
 		Dst:   g,
 		Event: event,
-		Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
-		Post:  csdf.Predicate(strings.Join(post, " ∧ ")),
+		Guard: csdf.Predicate(e.templates.join(guard)),
+		Post:  csdf.Predicate(e.templates.join(post)),
 	}
 }
 
@@ -251,7 +267,7 @@ func (e *expander) frame(g csdf.StateID, moved []csdf.Var) []string {
 		if slices.Contains(moved, v.Name) {
 			continue
 		}
-		clauses = append(clauses, fmt.Sprintf("%s' = %s", v.Name, v.Name))
+		clauses = append(clauses, e.templates.clause(clauseFrame, Clause{Var: string(v.Name)}))
 	}
 	return clauses
 }
