@@ -74,12 +74,6 @@ func (p *Parser) Parse() (*Diagram, error) {
 				return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
 			}
 			diagram.States[state.ID] = state.State
-		} else if p.peekKeyword("promote") {
-			promote, err := p.parsePromote()
-			if err != nil {
-				return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
-			}
-			diagram.Promotes = append(diagram.Promotes, promote)
 		} else if p.peekString("[*]") {
 			startEdge, err := p.parseStartEdge()
 			if err != nil {
@@ -92,7 +86,17 @@ func (p *Parser) Parse() (*Diagram, error) {
 				return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
 			}
 			if !isEdge {
-				return nil, fmt.Errorf("csdf.Parser.Parse: unexpected syntax at line %d, col %d", p.line, p.col)
+				// A promotion directive is never an edge, so the edge test
+				// comes first: it leaves "sync" and "promote" usable as state
+				// IDs.
+				parsed, err := p.parseDirective(diagram)
+				if err != nil {
+					return nil, fmt.Errorf("csdf.Parser.Parse: %w", err)
+				}
+				if !parsed {
+					return nil, fmt.Errorf("csdf.Parser.Parse: unexpected syntax at line %d, col %d", p.line, p.col)
+				}
+				continue
 			}
 
 			isEndEdge, err := p.isEndEdge()
@@ -390,6 +394,34 @@ func (p *Parser) parseEdge() (Edge, error) {
 	}, nil
 }
 
+// parseDirective parses one promotion directive into the diagram, reporting
+// whether the input at the current position was a directive at all.
+func (p *Parser) parseDirective(diagram *Diagram) (bool, error) {
+	switch {
+	case p.peekKeyword("promote"):
+		promote, err := p.parsePromote()
+		if err != nil {
+			return false, err
+		}
+		diagram.Promotes = append(diagram.Promotes, promote)
+	case p.peekKeyword("sync"):
+		sync, err := p.parseSync()
+		if err != nil {
+			return false, err
+		}
+		diagram.Syncs = append(diagram.Syncs, sync)
+	case p.peekKeyword("constrain"):
+		constrain, err := p.parseConstrain()
+		if err != nil {
+			return false, err
+		}
+		diagram.Constrains = append(diagram.Constrains, constrain)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
 // parsePromote parses
 //
 //	promote <path> as <Type> via <map>(<idParam>) [in <stateID>, ...]
@@ -463,6 +495,130 @@ func (p *Parser) parsePromote() (Promote, error) {
 		In:      in,
 		Line:    line,
 	}, nil
+}
+
+// parseSync parses
+//
+//	sync <event> : <map1>(<param1>), <map2>(<param2>), ...
+//
+// The event is the local event name, so it is written without its arguments.
+func (p *Parser) parseSync() (Sync, error) {
+	line := p.line
+	if !p.expectString("sync") {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: expected 'sync' at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+	}
+
+	event, err := p.parseUntil(':', '(', ';', '\n')
+	if err != nil {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+	}
+	if event == "" {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: expected an event name after 'sync' at line %d, col %d", p.line, p.col)
+	}
+	if !p.expectChar(':') {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: expected ':' after the event name at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+	}
+
+	var targets []MapRef
+	for {
+		target, err := p.parseMapRef()
+		if err != nil {
+			return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+		}
+		targets = append(targets, target)
+		if err := p.skipInlineTrivia(); err != nil {
+			return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+		}
+		if !p.expectChar(',') {
+			break
+		}
+		if err := p.skipInlineTrivia(); err != nil {
+			return Sync{}, fmt.Errorf("csdf.Parser.parseSync: %w", err)
+		}
+	}
+
+	if !p.expectNewlines() {
+		return Sync{}, fmt.Errorf("csdf.Parser.parseSync: expected newline after sync directive at line %d, col %d", p.line, p.col)
+	}
+
+	return Sync{Event: event, Targets: targets, Line: line}, nil
+}
+
+// parseConstrain parses
+//
+//	constrain <event>(<param>, ...) ; <guard>
+//
+// The event is written in its promoted form, so its first parameter is the
+// instance id. The guard is opaque, as every predicate is.
+func (p *Parser) parseConstrain() (Constrain, error) {
+	line := p.line
+	if !p.expectString("constrain") {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected 'constrain' at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+	}
+
+	event, err := p.parseUntil('(', ';', '\n')
+	if err != nil {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+	}
+	if event == "" {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected an event name after 'constrain' at line %d, col %d", p.line, p.col)
+	}
+	if !p.expectChar('(') {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected '(' after the event name at line %d, col %d", p.line, p.col)
+	}
+
+	var params []string
+	for {
+		if err := p.skipInlineTrivia(); err != nil {
+			return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+		}
+		param, err := p.parseUntil(',', ')', ';', '\n')
+		if err != nil {
+			return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+		}
+		if param == "" {
+			return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected a parameter name in '%s(...)' at line %d, col %d", event, p.line, p.col)
+		}
+		params = append(params, param)
+		if !p.expectChar(',') {
+			break
+		}
+	}
+	if !p.expectChar(')') {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected ')' after the parameter list at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+	}
+
+	if !p.expectChar(';') {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected ';' before the guard at line %d, col %d", p.line, p.col)
+	}
+	if err := p.skipInlineTrivia(); err != nil {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+	}
+	guard, err := p.parseUntilNewline()
+	if err != nil {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: %w", err)
+	}
+	if guard == "" {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected a guard after ';' at line %d, col %d", p.line, p.col)
+	}
+
+	if !p.expectNewlines() {
+		return Constrain{}, fmt.Errorf("csdf.Parser.parseConstrain: expected newline after constrain directive at line %d, col %d", p.line, p.col)
+	}
+
+	return Constrain{Event: event, Params: params, Guard: Predicate(guard), Line: line}, nil
 }
 
 func (p *Parser) parseInClause() ([]StateID, error) {
