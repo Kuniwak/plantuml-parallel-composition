@@ -6,13 +6,24 @@ A string representation of composable state transition models. It is a subset of
 Grammar Rules
 -------------
 ```abnf
-diagram = "@startuml" inlineTrivia 0*1(diagramName) LF trivia 1*(stateDecl trivia) startEdgeDecl trivia *(edgeDecl trivia) 0*1(endEdgeDecl trivia) "@enduml" LF
+diagram = "@startuml" inlineTrivia 0*1(diagramName) LF trivia 1*(stateDecl trivia) startEdgeDecl trivia *((edgeDecl / directiveDecl) trivia) 0*1(endEdgeDecl trivia) "@enduml" LF
 diagramName = 1*(HTAB / unicode_char)
 stateDecl = "state" inlineSeparator stateName inlineSeparator "as" inlineSeparator stateID inlineTrivia LF trivia *(stateVarDecl trivia)
 stateVarDecl = stateID inlineTrivia ":" inlineTrivia var inlineTrivia 0*1(";" inlineTrivia varType) LF
 startEdgeDecl = "[*]" inlineSeparator "-->" inlineSeparator stateID 0*1(inlineTrivia ":" inlineSeparator post) inlineTrivia LF
 edgeDecl = stateID inlineSeparator "-->" inlineSeparator stateID inlineTrivia ":" inlineTrivia event 0*1(inlineTrivia ";" inlineTrivia guard 0*1(inlineTrivia ";" inlineTrivia post)) inlineTrivia LF
 endEdgeDecl = stateID inlineSeparator "-->" inlineSeparator "[*]" 0*1(inlineTrivia ":" inlineSeparator guard) inlineTrivia LF
+directiveDecl = promoteDecl / syncDecl / constrainDecl
+promoteDecl = "promote" inlineSeparator path inlineSeparator "as" inlineSeparator typeName inlineSeparator "via" inlineSeparator mapRef 0*1(inlineSeparator inClause) inlineTrivia LF
+inClause = "in" inlineSeparator stateID *(inlineTrivia "," inlineTrivia stateID)
+syncDecl = "sync" inlineSeparator syncEventName inlineTrivia ":" inlineTrivia mapRef *(inlineTrivia "," inlineTrivia mapRef) inlineTrivia LF
+constrainDecl = "constrain" inlineSeparator constrainEventName inlineTrivia "(" inlineTrivia param *("," inlineTrivia param) ")" inlineTrivia ";" inlineTrivia guard inlineTrivia LF
+mapRef = var inlineTrivia "(" inlineTrivia param ")"
+path = stateName / 1*unicode_char_except_space
+typeName = id
+syncEventName = 1*unicode_char_except_colon_paren_semicolon
+constrainEventName = 1*unicode_char_except_paren_semicolon
+param = 1*unicode_char_except_comma_paren_semicolon
 stateName = DQUOTE 1*(unicode_char_except_dquote_and_backslash / escape_backslash / escape_dquote) DQUOTE
 escape_backslash = "\\"
 escape_dquote = "\" DQUOTE
@@ -38,6 +49,10 @@ unicode_char_except_dquote_and_backslash = %x20-21 / %x23-5B / %x5D-7F / %x80-10
 unicode_char_except_squote = %x20-26 / %x28-7F / %x80-10FFFF
 unicode_char_except_slash = %x20-2E / %x30-7F / %x80-10FFFF
 unicode_char_except_semicolon = %x20-3A / %x3C-7F / %x80-10FFFF
+unicode_char_except_space = %x21-7F / %x80-10FFFF
+unicode_char_except_paren_semicolon = %x20-27 / %x2A-3A / %x3C-7F / %x80-10FFFF
+unicode_char_except_colon_paren_semicolon = %x20-27 / %x2A-39 / %x3C-7F / %x80-10FFFF
+unicode_char_except_comma_paren_semicolon = %x20-27 / %x2A-2B / %x2D-3A / %x3C-7F / %x80-10FFFF
 ```
 
 Line comments are accepted between declarations and state-variable lines.
@@ -53,6 +68,13 @@ wrapped content (for example Graphviz directives such as `left to right directio
 rendered by PlantUML while CSDF ignores it. An unterminated ignore region is a parse error.
 Comment delimiters inside double-quoted strings are treated as ordinary text.
 An event must remain non-empty after comments and surrounding whitespace are removed.
+
+A line is read as a `directiveDecl` only when it is not an `edgeDecl`, so `promote`, `sync`
+and `constrain` remain usable as state IDs. Leading and trailing whitespace is removed from
+a `path`, a `param` and a `guard`. Promotion directives are the input of `csdfpromote` and
+of nothing else: every other tool refuses a diagram that still carries them, because such a
+diagram's edges are not the whole of its behaviour. `csdfparse` is the one exception, since
+reporting the diagram is all it does. See PROMOTION.md for what the directives mean.
 
 The following symbols are ABNF core rules:
 
@@ -80,11 +102,38 @@ type StateVar struct {
 }
 
 type Diagram struct {
-	Name      string
-	States    map[StateID]State
-	StartEdge StartEdge
-	Edges     []Edge
-	EndEdge   *EndEdge
+	Name       string
+	States     map[StateID]State
+	StartEdge  StartEdge
+	Edges      []Edge
+	EndEdge    *EndEdge
+	Promotes   []Promote
+	Syncs      []Sync
+	Constrains []Constrain
+}
+
+type Promote struct {
+	Path    string
+	Type    string
+	Map     Var
+	IDParam string
+	In      []StateID
+}
+
+type Sync struct {
+	Event   string
+	Targets []MapRef
+}
+
+type MapRef struct {
+	Map   Var
+	Param string
+}
+
+type Constrain struct {
+	Event  string
+	Params []string
+	Guard  string
 }
 
 type State struct {
@@ -124,6 +173,13 @@ Semantics
 | `startEdgeDecl`                            | `StartEdge`        | Represents a declaration of transition to the initial state.                                                                                                             |
 | `edgeDecl`                                 | `Edge`             | Represents a declaration of a directed edge.                                                                                                                             |
 | `endEdgeDecl`                              | `EndEdge`          | Represents a declaration of transition to the end state.                                                                                                                 |
+| `promoteDecl`                              | `Promote`          | Promotes the local diagram at `path` through the state variable named by `mapRef`, which holds a partial map from instance IDs to local states. `typeName` names the local state type, and the `param` of `mapRef` names the instance ID. See PROMOTION.md. |
+| `inClause`                                 | `[]StateID`        | The global states the local diagram is expanded into. Omitting it means the destination of `startEdgeDecl` alone.                                                        |
+| `syncDecl`                                 | `Sync`             | Merges the edges the named local event contributes to each of the referenced maps into a single global edge, so that the instances take the event together.              |
+| `constrainDecl`                            | `Constrain`        | Conjoins `guard` onto the guard of every expanded edge whose event matches `constrainEventName` in name and in number of parameters. The event is written in its promoted form, so its first parameter is the instance ID. |
+| `mapRef`                                   | `MapRef`           | A promoted map together with the parameter that stands for its instance ID.                                                                                              |
+| `path`                                     | `string`           | Path of a local diagram, resolved against the directory of the file the directive is in. Double-quote it when it contains a space.                                       |
+| `param`                                    | `string`           | Free-form parameter name, in the same natural language as the predicates.                                                                                                |
 | `stateName`                                | `string`           | State name. Represents a string with leading and trailing double quotes removed and escapes resolved.                                                                    |
 | `escape_backslash`                         | `rune`             | Represents `\`.                                                                                                                                                          |
 | `escape_dquote`                            | `rune`             | Represents `"`.                                                                                                                                                          |
