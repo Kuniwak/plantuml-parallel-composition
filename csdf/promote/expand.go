@@ -81,12 +81,16 @@ type expander struct {
 	// paths is where each map's local diagram was read from. A block with no
 	// body has no path of its own, but its edges came from the same file.
 	paths map[csdf.Var]string
+	// order is the block that carries each map's !include, in source order, so
+	// the checks and the expansion read the maps in the order they were written.
+	order []Promote
 	diags []Diagnostic
 }
 
 func (e *expander) run() (*Expansion, []Diagnostic, error) {
-	if err := e.loadLocals(); err != nil {
-		return nil, e.diags, err
+	e.check()
+	if hasError(e.diags) {
+		return nil, e.diags, nil
 	}
 
 	out := e.global.Core.Clone()
@@ -107,24 +111,6 @@ func (e *expander) run() (*Expansion, []Diagnostic, error) {
 	x := &Expansion{Diagram: out, Origins: origins}
 	x.sortEdges()
 	return x, e.diags, nil
-}
-
-// loadLocals reads the local diagram of every promoted map. A map may hold more
-// than one block - one per state it moves in - but only one of them carries the
-// !include, because two copies of one file would collide on every state ID.
-func (e *expander) loadLocals() error {
-	for _, p := range e.global.Promotes {
-		if p.Path == "" {
-			continue
-		}
-		local, err := e.load(p.Path)
-		if err != nil {
-			return fmt.Errorf("promote.Expand: line %d: %w", p.Line, err)
-		}
-		e.locals[p.Map] = local
-		e.paths[p.Map] = p.Path
-	}
-	return nil
 }
 
 // promoteEdge lifts one local edge onto the global state the block was written
