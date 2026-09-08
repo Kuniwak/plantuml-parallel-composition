@@ -11,11 +11,6 @@ import (
 	"github.com/Kuniwak/puml-parallel/csdf"
 )
 
-// Loader reads the local diagram a promote directive names. The path is taken
-// verbatim from the directive, so resolving it against a base directory is the
-// caller's business.
-type Loader func(path string) (*csdf.Diagram, error)
-
 type Severity int
 
 const (
@@ -93,7 +88,7 @@ type Options struct {
 // Expand consumes every promotion directive of the diagram. It never fails
 // outright: what goes wrong is reported as a diagnostic, and the caller decides
 // what an error means (Errors).
-func Expand(global *csdf.Diagram, load Loader, opts Options) (*Result, []Diagnostic) {
+func Expand(global *csdf.Diagram, load csdf.DiagramLoader, opts Options) (*Result, []Diagnostic) {
 	var diags []Diagnostic
 
 	render := newRenderer(opts.Templates)
@@ -171,7 +166,7 @@ type resolvedPromote struct {
 
 // resolvePromotes checks and loads every promote directive, returning them by
 // map together with the order they were written in.
-func resolvePromotes(global *csdf.Diagram, load Loader) (map[csdf.Var]*resolvedPromote, []csdf.Var, []Diagnostic) {
+func resolvePromotes(global *csdf.Diagram, load csdf.DiagramLoader) (map[csdf.Var]*resolvedPromote, []csdf.Var, []Diagnostic) {
 	var diags []Diagnostic
 	promotions := make(map[csdf.Var]*resolvedPromote, len(global.Promotes))
 	var order []csdf.Var
@@ -200,7 +195,7 @@ func resolvePromotes(global *csdf.Diagram, load Loader) (map[csdf.Var]*resolvedP
 	return promotions, order, diags
 }
 
-func resolvePromote(global *csdf.Diagram, promotion csdf.Promote, load Loader) (*resolvedPromote, []Diagnostic) {
+func resolvePromote(global *csdf.Diagram, promotion csdf.Promote, load csdf.DiagramLoader) (*resolvedPromote, []Diagnostic) {
 	var diags []Diagnostic
 
 	targets := promotion.In

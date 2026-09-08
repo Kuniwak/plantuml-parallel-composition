@@ -23,7 +23,7 @@ func mustParseGlobal(source string) *csdf.Diagram {
 
 // stubLoader answers with the diagrams it was built from, and reports every
 // other path as missing, the way the file system would.
-func stubLoader(sources map[string]string) promote.Loader {
+func stubLoader(sources map[string]string) csdf.DiagramLoader {
 	return func(path string) (*csdf.Diagram, error) {
 		source, ok := sources[path]
 		if !ok {
@@ -209,7 +209,7 @@ none --> open : OPEN
 // diagnosticsOf runs Expand and returns its diagnostics of one severity as
 // strings, so that a test can say what it expects without naming line numbers
 // twice.
-func diagnosticsOf(t *testing.T, global *csdf.Diagram, load promote.Loader, severity promote.Severity) []string {
+func diagnosticsOf(t *testing.T, global *csdf.Diagram, load csdf.DiagramLoader, severity promote.Severity) []string {
 	t.Helper()
 	_, diags := promote.Expand(global, load, promote.Options{})
 	var got []string

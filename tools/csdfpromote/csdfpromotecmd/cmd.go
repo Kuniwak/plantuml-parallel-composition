@@ -40,7 +40,7 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 
-		result, diags := promote.Expand(global, promote.Loader(csdf.NewFileDiagramLoader(opts.BaseDir)), promote.Options{Templates: parsed})
+		result, diags := promote.Expand(global, csdf.NewFileDiagramLoader(opts.BaseDir), promote.Options{Templates: parsed})
 
 		warnings := 0
 		for _, diag := range diags {
