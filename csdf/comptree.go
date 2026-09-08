@@ -142,6 +142,20 @@ func NewFileDiagramLoader(baseDir string) DiagramLoader {
 	}
 }
 
+// NewMapDiagramLoader loads referenced diagrams from PlantUML sources held in
+// memory, keyed by the path that refers to them. It is the counterpart of
+// NewFileDiagramLoader for a caller that has the sources already — a test, or a
+// composition assembled in memory.
+func NewMapDiagramLoader(sources map[string]string) DiagramLoader {
+	return func(path string) (*Diagram, error) {
+		source, ok := sources[path]
+		if !ok {
+			return nil, fmt.Errorf("no such diagram: %q", path)
+		}
+		return Parse(source)
+	}
+}
+
 // ComposeTree evaluates a composition tree into a single diagram, loading the
 // diagrams of its REFER leaves with load.
 func ComposeTree(expr Expr, load DiagramLoader) (*Diagram, error) {

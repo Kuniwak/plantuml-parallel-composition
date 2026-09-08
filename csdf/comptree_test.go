@@ -170,3 +170,28 @@ s0 --> s1 : sync
 		t.Errorf("want %d states, got %d: %s", want, len(got.States), got.String())
 	}
 }
+
+func TestNewMapDiagramLoader(t *testing.T) {
+	// Arrange
+	load := NewMapDiagramLoader(map[string]string{"a.puml": `@startuml
+state "A" as a
+[*] --> a
+a --> a : e
+@enduml
+`})
+
+	// Act
+	diagram, err := load("a.puml")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("load(\"a.puml\") = _, %v; want no error", err)
+	}
+	if len(diagram.Edges) != 1 {
+		t.Errorf("len(Edges) = %d; want 1", len(diagram.Edges))
+	}
+
+	if _, err := load("missing.puml"); err == nil {
+		t.Errorf("load(\"missing.puml\") = _, nil; want an error")
+	}
+}

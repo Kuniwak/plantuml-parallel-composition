@@ -1,7 +1,6 @@
 package promote_test
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -31,18 +30,6 @@ none --> one : E
 @enduml
 `
 
-// stubLoader answers with the diagrams it was built from, and reports every
-// other path as missing, the way the file system would.
-func stubLoader(sources map[string]string) csdf.DiagramLoader {
-	return func(path string) (*csdf.Diagram, error) {
-		source, ok := sources[path]
-		if !ok {
-			return nil, fmt.Errorf("no such file: %q", path)
-		}
-		return csdf.Parse(source)
-	}
-}
-
 func TestExpandPromotesEveryLocalEdge(t *testing.T) {
 	// Arrange: the local diagram's start state means "no such instance", so
 	// leaving it creates one and entering it deletes one.
@@ -53,7 +40,7 @@ running : accounts ; 口座ID ⇸ Account
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
@@ -107,7 +94,7 @@ running : audits ; 監査ID ⇸ Audit
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
@@ -169,7 +156,7 @@ running --> degraded : DEGRADE ; true ; accounts' = accounts
 promote local/ACCOUNT.puml as Account via accounts(口座ID) in running, degraded
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
@@ -277,7 +264,7 @@ promote local/MISSING.puml as Account via accounts(口座ID)
 @enduml
 `,
 			Sources: map[string]string{},
-			Want:    []string{`promote local/MISSING.puml: no such file: "local/MISSING.puml"`},
+			Want:    []string{`promote local/MISSING.puml: no such diagram: "local/MISSING.puml"`},
 		},
 		"the start state of the local diagram holds state variables": {
 			Global: `@startuml
@@ -372,7 +359,7 @@ sync OPEN : accounts(口座ID), audits(監査ID)
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			got := diagnosticsOf(t, mustParseGlobal(tc.Global), stubLoader(tc.Sources), promote.SeverityError)
+			got := diagnosticsOf(t, mustParseGlobal(tc.Global), csdf.NewMapDiagramLoader(tc.Sources), promote.SeverityError)
 			if diff := cmp.Diff(tc.Want, got); diff != "" {
 				t.Errorf("errors mismatch (-want +got):\n%s", diff)
 			}
@@ -393,7 +380,7 @@ promote local/CYCLE.puml as Cycle via cycles(基準日)
 sync BOOK : buys(約定ID), cycles(基準日)
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/BUY.puml": `@startuml
 state "なし" as none
 state "約定済み" as booked
@@ -458,7 +445,7 @@ constrain OPEN(口座ID) ; 申込書が受理されている
 constrain FREEZE(口座ID, 理由) ; 理由 は凍結事由の一覧にある
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
@@ -508,7 +495,7 @@ promote local/ACCOUNT.puml as Account via accounts(口座ID)
 constrain OPEN(口座ID, 理由) ; なにか
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
@@ -618,7 +605,7 @@ none --> open : OPEN
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			global := mustParseGlobal(tc.Global)
-			load := stubLoader(tc.Sources)
+			load := csdf.NewMapDiagramLoader(tc.Sources)
 			if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
 				t.Fatalf("Expand() reported errors: %v", got)
 			}
@@ -642,7 +629,7 @@ running --> maintenance : ENTER ; true ; accounts' = accounts
 promote local/ACCOUNT.puml as Account via accounts(口座ID) in running
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none
@@ -680,7 +667,7 @@ running : audits ; 監査ID ⇸ Audit
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 state "凍結中" as frozen
@@ -750,7 +737,7 @@ promote local/Y.puml as Y via ys(y)
 sync E : xs(x), ys(y)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/X.puml": two, "local/Y.puml": two})
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": two, "local/Y.puml": two})
 
 	// Act
 	result, diags := promote.Expand(global, load, promote.Options{})
@@ -789,7 +776,7 @@ promote local/ACCOUNT.puml as Account via accounts(買い手)
 sync TRANSFER : accounts(買い手), accounts(売り手)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none
@@ -814,7 +801,7 @@ promote local/ACCOUNT.puml as Account via accounts(口座ID)
 sync tau : accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none
@@ -844,7 +831,7 @@ running : accounts
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none
@@ -880,7 +867,7 @@ sync E : xs(x), ys(y)
 sync E : xs(x), ys(y)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal, "local/Y.puml": twoStateLocal})
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal, "local/Y.puml": twoStateLocal})
 
 	want := []string{"sync E: the event is already synced at line 8"}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
@@ -899,7 +886,7 @@ promote local/X.puml as X via xs(x)
 sync E : xs(x)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal})
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal})
 
 	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
 		t.Fatalf("Expand() reported errors: %v", got)
@@ -926,7 +913,7 @@ promote local/Z.puml as Z via zs(z)
 sync E : xs(x), ys(y)
 @enduml
 `)
-	load := stubLoader(map[string]string{
+	load := csdf.NewMapDiagramLoader(map[string]string{
 		"local/X.puml": twoStateLocal,
 		"local/Y.puml": twoStateLocal,
 		"local/Z.puml": twoStateLocal,
@@ -952,7 +939,7 @@ running : accounts
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none : 残高は 0
@@ -984,7 +971,7 @@ running : accounts
 promote local/ACCOUNT.puml as Account via accounts(口座ID)
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
 state "未開設" as none
 state "開設済み" as open
 [*] --> none
@@ -1008,7 +995,7 @@ promote local/X.puml as X via xs(x)
 constrain NOPE(x) ; なにか
 @enduml
 `)
-	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal})
+	load := csdf.NewMapDiagramLoader(map[string]string{"local/X.puml": twoStateLocal})
 
 	want := []string{"constrain NOPE/1: no expanded edge carries that event with that many arguments; no expanded edge carries NOPE at all"}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
