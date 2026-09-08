@@ -3,9 +3,22 @@ package csdf
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"github.com/Kuniwak/puml-parallel/pngsrc"
 )
+
+// promotionTraceRe matches what a global diagram carries and a plain one does
+// not: a <<promote>> block, the !include that names its local diagram, or the
+// note a sync or constrain is written in. Such a diagram's edges are not the
+// whole of its behaviour, so parsing it here would be worse than failing - and
+// it does fail, on syntax the core grammar has no rule for. The hint says what
+// the author is missing rather than leaving them to read a column number.
+var promotionTraceRe = regexp.MustCompile(`(?m)^\s*(?:<<promote>>|!include\s|note\s+(?:as|left|right|top|bottom)\s)|<<promote>>`)
+
+// promotionHint is appended to a parse error when the source looks like a global
+// diagram that has not been expanded yet.
+const promotionHint = "the source holds promotion directives; run csdfpromote on it first"
 
 // ParseBytes parses a Composable State Diagram from raw .puml text or .png
 // bytes (the embedded PlantUML source is extracted from PNG inputs).
@@ -16,7 +29,7 @@ func ParseBytes(content []byte) (*Diagram, error) {
 	}
 	diagram, err := NewParser(source).Parse()
 	if err != nil {
-		return nil, fmt.Errorf("csdf.ParseBytes: parse: %w", err)
+		return nil, fmt.Errorf("csdf.ParseBytes: parse: %w%s", err, hint(source))
 	}
 	return diagram, nil
 }
@@ -24,9 +37,18 @@ func ParseBytes(content []byte) (*Diagram, error) {
 func Parse(content string) (*Diagram, error) {
 	diagram, err := NewParser(content).Parse()
 	if err != nil {
-		return nil, fmt.Errorf("csdf.Parse: parse: %w", err)
+		return nil, fmt.Errorf("csdf.Parse: parse: %w%s", err, hint(content))
 	}
 	return diagram, nil
+}
+
+// hint returns the promotion hint, prefixed for appending to an error, when the
+// source looks like a global diagram; otherwise the empty string.
+func hint(source string) string {
+	if promotionTraceRe.MatchString(source) {
+		return ": " + promotionHint
+	}
+	return ""
 }
 
 func MustParse(content string) *Diagram {
