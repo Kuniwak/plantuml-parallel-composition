@@ -1,6 +1,7 @@
 package csdf
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -29,7 +30,7 @@ func ParseBytes(content []byte) (*Diagram, error) {
 	}
 	diagram, err := NewParser(source).Parse()
 	if err != nil {
-		return nil, fmt.Errorf("csdf.ParseBytes: parse: %w%s", err, hint(source))
+		return nil, fmt.Errorf("csdf.ParseBytes: parse: %w", withHint(err, source))
 	}
 	return diagram, nil
 }
@@ -37,18 +38,20 @@ func ParseBytes(content []byte) (*Diagram, error) {
 func Parse(content string) (*Diagram, error) {
 	diagram, err := NewParser(content).Parse()
 	if err != nil {
-		return nil, fmt.Errorf("csdf.Parse: parse: %w%s", err, hint(content))
+		return nil, fmt.Errorf("csdf.Parse: parse: %w", withHint(err, content))
 	}
 	return diagram, nil
 }
 
-// hint returns the promotion hint, prefixed for appending to an error, when the
-// source looks like a global diagram; otherwise the empty string.
-func hint(source string) string {
-	if promotionTraceRe.MatchString(source) {
-		return ": " + promotionHint
+// withHint adds the promotion hint to a parse error when the source looks like a
+// global diagram. It returns a fresh error rather than wrapping, because the
+// message a user sees is the deepest error of the chain: a hint on an outer
+// wrapper would only show under -debug, which is not where it is needed.
+func withHint(err error, source string) error {
+	if !promotionTraceRe.MatchString(source) {
+		return err
 	}
-	return ""
+	return errors.New(err.Error() + ": " + promotionHint)
 }
 
 func MustParse(content string) *Diagram {
