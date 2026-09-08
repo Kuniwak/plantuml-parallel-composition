@@ -2,6 +2,7 @@ package promote
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -68,7 +69,7 @@ var eventRe = regexp.MustCompile(`^([^()]+?)\s*\(\s*(.*?)\s*\)$`)
 
 // Expand turns every promotion into edges on the state its block was written in.
 func Expand(g *GlobalDiagram, load LoadFunc) (*Expansion, []Diagnostic, error) {
-	e := &expander{global: g, load: load, locals: map[csdf.Var]*csdf.Diagram{}}
+	e := &expander{global: g, load: load, locals: map[csdf.Var]*csdf.Diagram{}, paths: map[csdf.Var]string{}}
 	return e.run()
 }
 
@@ -77,7 +78,10 @@ type expander struct {
 	load   LoadFunc
 
 	locals map[csdf.Var]*csdf.Diagram
-	diags  []Diagnostic
+	// paths is where each map's local diagram was read from. A block with no
+	// body has no path of its own, but its edges came from the same file.
+	paths map[csdf.Var]string
+	diags []Diagnostic
 }
 
 func (e *expander) run() (*Expansion, []Diagnostic, error) {
@@ -118,6 +122,7 @@ func (e *expander) loadLocals() error {
 			return fmt.Errorf("promote.Expand: line %d: %w", p.Line, err)
 		}
 		e.locals[p.Map] = local
+		e.paths[p.Map] = p.Path
 	}
 	return nil
 }
@@ -163,7 +168,7 @@ func (e *expander) promoteEdge(p Promote, local *csdf.Diagram, edge csdf.Edge) (
 		Event: promoteEvent(edge.Event, p.IDParam),
 		Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
 		Post:  csdf.Predicate(strings.Join(post, " ∧ ")),
-	}, fmt.Sprintf("promote: %s 〈%s〉 → 〈%s〉", p.Path, src.Name, dst.Name)
+	}, fmt.Sprintf("promote: %s 〈%s〉 → 〈%s〉", e.paths[p.Map], src.Name, dst.Name)
 }
 
 // frame says that the state variables this edge does not touch are unchanged.
@@ -215,4 +220,15 @@ func (x *Expansion) sortEdges() {
 	}
 	x.Diagram.Edges = edges
 	x.Origins = origins
+}
+
+// FileLoader resolves !include paths against base, the directory the global
+// diagram was read from.
+func FileLoader(base string) LoadFunc {
+	return func(path string) (*csdf.Diagram, error) {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+		return csdf.LoadDiagram(path)
+	}
 }

@@ -7,13 +7,13 @@ title 監査 1 件のライフサイクル
 
 state "未着手" as audIdle
 state "調査中" as audOpen
-audOpen : 対象 ; 口座ID
+audOpen : target ; 対象の口座ID
 state "報告済み" as audDone
-audDone : 対象 ; 口座ID
+audDone : target ; 対象の口座ID
 
 [*] --> audIdle
 
-audIdle --> audOpen : AUDIT-BEGIN(口座ID) ; true ; 対象は 口座ID
+audIdle --> audOpen : AUDIT-BEGIN(口座ID) ; true ; target は 口座ID
 audOpen --> audDone : AUDIT-REPORT
 audDone --> audIdle : AUDIT-ARCHIVE
 @enduml

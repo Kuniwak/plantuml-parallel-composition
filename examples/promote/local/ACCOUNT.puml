@@ -10,15 +10,15 @@ title 口座 1 件のライフサイクル
 
 state "未開設" as accNone
 state "開設済み" as accOpen
-accOpen : 残高 ; 金額
+accOpen : balance ; 残高
 state "凍結中" as accFrozen
-accFrozen : 残高 ; 金額
-accFrozen : 凍結理由 ; 理由
+accFrozen : balance ; 残高
+accFrozen : reason ; 凍結理由
 
 [*] --> accNone
 
-accNone --> accOpen : OPEN ; true ; 残高は 0
-accOpen --> accFrozen : FREEZE(理由) ; true ; 凍結理由は 理由
+accNone --> accOpen : OPEN ; true ; balance は 0
+accOpen --> accFrozen : FREEZE(理由) ; true ; reason は 理由
 accFrozen --> accOpen : UNFREEZE
-accOpen --> accNone : CLOSE ; 残高が 0
+accOpen --> accNone : CLOSE ; balance が 0
 @enduml
