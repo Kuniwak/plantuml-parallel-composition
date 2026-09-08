@@ -74,8 +74,12 @@ type Result struct {
 // edgeWithOrigin keeps an edge and its origin together while the edges are
 // sorted, which is the only reason Origins can be a plain parallel slice.
 type edgeWithOrigin struct {
-	Edge   csdf.Edge
-	Origin string
+	Edge csdf.Edge
+	// Generated tells an expanded edge from one the author wrote by hand. It is
+	// not the same question as whether Origin is empty, even though the two
+	// answers happen to agree: Origin is text for a reader.
+	Generated bool
+	Origin    string
 }
 
 // Options is what an expansion can be told about how to render itself.
@@ -383,6 +387,7 @@ func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promot
 	post := append(parts.Post, frame(global, target, render, promotion.Map)...)
 
 	return edgeWithOrigin{
+		Generated: true,
 		Edge: csdf.Edge{
 			Src:   target,
 			Dst:   target,
@@ -567,6 +572,7 @@ func expandSync(global *csdf.Diagram, sync csdf.Sync, promotions map[csdf.Var]*r
 
 		for _, target := range targets {
 			edges = append(edges, edgeWithOrigin{
+				Generated: true,
 				Edge: csdf.Edge{
 					Src:   target,
 					Dst:   target,
@@ -610,7 +616,7 @@ func appendUnique(args []string, arg string) []string {
 func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnostic {
 	matched := 0
 	for i, edge := range edges {
-		if edge.Origin == "" {
+		if !edge.Generated {
 			continue
 		}
 		name, args := splitEvent(edge.Edge.Event)
