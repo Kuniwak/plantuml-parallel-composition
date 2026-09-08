@@ -1,0 +1,18 @@
+@startuml TRADES
+state "稼働中" as running
+running: buys ; 約定ID ⇸ Buy
+running: cycles ; 基準日 ⇸ Cycle
+[*] --> running : buys と cycles は空
+' sync: BOOK (local/BUY.puml 〈約定済み〉 → 〈記帳済み〉) × (local/CYCLE.puml 〈集計中〉 → 〈集計中〉)
+running --> running : BOOK(約定ID, 基準日, 数量) ; 約定ID ∈ dom buys ∧ buys(約定ID) ∈ 〈約定済み〉 ∧ 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈集計中〉 ∧ 基準日 は 約定ID の約定日である ; buys' = buys ⊕ {約定ID ↦ 〈記帳済み〉} ∧ cycles' = cycles ⊕ {基準日 ↦ 〈集計中〉} ∧ total' = total + 数量
+' sync: BOOK (local/BUY.puml 〈約定済み〉 → 〈記帳済み〉) × (local/CYCLE.puml 〈未開始〉 → 〈集計中〉)
+running --> running : BOOK(約定ID, 基準日, 数量) ; 約定ID ∈ dom buys ∧ buys(約定ID) ∈ 〈約定済み〉 ∧ 基準日 ∉ dom cycles ∧ 基準日 は 約定ID の約定日である ; buys' = buys ⊕ {約定ID ↦ 〈記帳済み〉} ∧ cycles' = cycles ∪ {基準日 ↦ 〈集計中〉} ∧ total は 数量
+' promote: local/BUY.puml 〈なし〉 → 〈約定済み〉
+running --> running : BUY(約定ID, 数量) ; 約定ID ∉ dom buys ∧ 数量 は最小取引単位の倍数である ; buys' = buys ∪ {約定ID ↦ 〈約定済み〉} ∧ qty は 数量 ∧ cycles' = cycles
+' promote: local/CYCLE.puml 〈確定済み〉 → 〈未開始〉
+running --> running : REPORT(基準日) ; 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈確定済み〉 ; cycles' = {基準日} ⩤ cycles ∧ buys' = buys
+' promote: local/BUY.puml 〈記帳済み〉 → 〈なし〉
+running --> running : SETTLE(約定ID) ; 約定ID ∈ dom buys ∧ buys(約定ID) ∈ 〈記帳済み〉 ; buys' = {約定ID} ⩤ buys ∧ cycles' = cycles
+' promote: local/CYCLE.puml 〈集計中〉 → 〈確定済み〉
+running --> running : tau ; 基準日 ∈ dom cycles ∧ cycles(基準日) ∈ 〈集計中〉 ; cycles' = cycles ⊕ {基準日 ↦ 〈確定済み〉} ∧ buys' = buys
+@enduml
