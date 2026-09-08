@@ -1,9 +1,7 @@
 package csdfpromotecmd
 
 import (
-	"errors"
 	"fmt"
-	"os"
 
 	"github.com/Kuniwak/puml-parallel/cli"
 	"github.com/Kuniwak/puml-parallel/csdf"
@@ -27,35 +25,22 @@ func NewMainFunc() cli.MainFunc[*Options] {
 			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 
-		templates := promote.DefaultTemplates
-		if opts.TemplatePath != "" {
-			bs, err := os.ReadFile(opts.TemplatePath)
-			if err != nil {
-				return fmt.Errorf("csdfpromotecmd.NewMainFunc: cannot read the template file: %w", err)
-			}
-			templates = string(bs)
-		}
-		parsed, err := promote.ParseTemplates(templates)
+		templates, err := promote.LoadTemplates(opts.TemplatePath)
 		if err != nil {
 			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 
-		result, diags := promote.Expand(global, csdf.NewFileDiagramLoader(opts.BaseDir), promote.Options{Templates: parsed})
-
-		warnings := 0
+		result, diags, err := promote.Run(global, csdf.NewFileDiagramLoader(opts.BaseDir), promote.RunOptions{
+			Templates: templates,
+			Werror:    opts.Werror,
+		})
 		for _, diag := range diags {
 			fmt.Fprintln(inout.Stderr, diag)
-			if diag.Severity == promote.SeverityWarning {
-				warnings++
-			}
 		}
 		// An unsound expansion must not reach the tools downstream, so nothing
 		// is printed when the check failed.
-		if errs := promote.Errors(diags); len(errs) > 0 {
-			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", errors.New(pluralize(len(errs), "error")+" in the promotion directives"))
-		}
-		if opts.Werror && warnings > 0 {
-			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", errors.New(pluralize(warnings, "warning")+" in the promotion directives (-Werror)"))
+		if err != nil {
+			return fmt.Errorf("csdfpromotecmd.NewMainFunc: %w", err)
 		}
 
 		if opts.LintOnly {
@@ -63,18 +48,7 @@ func NewMainFunc() cli.MainFunc[*Options] {
 		}
 
 		result.Diagram.Name = tools.GeneratedBy("csdfpromote", opts.Args)
-		origins := result.Origins
-		if opts.NoComments {
-			origins = nil
-		}
-		fmt.Fprint(inout.Stdout, result.Diagram.StringWithEdgeComments(origins))
+		fmt.Fprint(inout.Stdout, result.String(!opts.NoComments))
 		return nil
 	}
-}
-
-func pluralize(n int, noun string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, noun)
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }

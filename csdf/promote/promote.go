@@ -71,6 +71,17 @@ type Result struct {
 	Origins []string
 }
 
+// String prints the expanded diagram as PlantUML. With comments, every
+// generated edge is preceded by a line comment naming the local edge it came
+// from. Pairing the two is the reason to call this rather than to print the
+// diagram and the origins separately.
+func (r *Result) String(comments bool) string {
+	if !comments {
+		return r.Diagram.String()
+	}
+	return r.Diagram.StringWithEdgeComments(r.Origins)
+}
+
 // edgeWithOrigin keeps an edge and its origin together while the edges are
 // sorted, which is the only reason Origins can be a plain parallel slice.
 type edgeWithOrigin struct {
@@ -80,6 +91,47 @@ type edgeWithOrigin struct {
 	// answers happen to agree: Origin is text for a reader.
 	Generated bool
 	Origin    string
+}
+
+// RunOptions is what Run needs beyond the diagram itself.
+type RunOptions struct {
+	// Templates renders the generated phrases. A nil value means the symbolic
+	// ones (DefaultClauseTemplates).
+	Templates *Templates
+	// Werror makes a warning as fatal as an error.
+	Werror bool
+}
+
+// Run expands the directives and judges the diagnostics: an error is fatal, and
+// so is a warning under Werror. The diagnostics come back either way, since a
+// caller reports all of them and prints the diagram only when nothing is fatal.
+func Run(global *csdf.Diagram, load csdf.DiagramLoader, opts RunOptions) (*Result, []Diagnostic, error) {
+	result, diags := Expand(global, load, Options{Templates: opts.Templates})
+
+	if errs := Errors(diags); len(errs) > 0 {
+		return result, diags, fmt.Errorf("%s in the promotion directives", pluralize(len(errs), "error"))
+	}
+
+	if opts.Werror {
+		warnings := 0
+		for _, diag := range diags {
+			if diag.Severity == SeverityWarning {
+				warnings++
+			}
+		}
+		if warnings > 0 {
+			return result, diags, fmt.Errorf("%s in the promotion directives (-Werror)", pluralize(warnings, "warning"))
+		}
+	}
+
+	return result, diags, nil
+}
+
+func pluralize(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // Options is what an expansion can be told about how to render itself.

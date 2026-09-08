@@ -2,6 +2,7 @@ package promote
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"text/template"
@@ -72,7 +73,9 @@ func ParseTemplates(text string) (*Templates, error) {
 	return &Templates{t: t}, nil
 }
 
-func mustParseTemplates(text string) *Templates {
+// MustParseTemplates is ParseTemplates for templates known to be valid, such as
+// a constant in the program itself.
+func MustParseTemplates(text string) *Templates {
 	templates, err := ParseTemplates(text)
 	if err != nil {
 		panic(err)
@@ -80,7 +83,23 @@ func mustParseTemplates(text string) *Templates {
 	return templates
 }
 
-var defaultTemplates = mustParseTemplates("")
+// LoadTemplates reads clause templates from the file at path, or returns the
+// symbolic ones when path is empty.
+func LoadTemplates(path string) (*Templates, error) {
+	if path == "" {
+		return DefaultClauseTemplates(), nil
+	}
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("promote.LoadTemplates: %w", err)
+	}
+	return ParseTemplates(string(bs))
+}
+
+// DefaultClauseTemplates returns the symbolic phrases, parsed.
+func DefaultClauseTemplates() *Templates { return defaultTemplates }
+
+var defaultTemplates = MustParseTemplates("")
 
 // renderer renders the clauses of one expansion, collecting the faults of a
 // template that parses but cannot run. Such a fault would otherwise end up
