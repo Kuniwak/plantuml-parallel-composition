@@ -99,7 +99,20 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 		edges = append(edges, edgeWithOrigin{Edge: edge})
 	}
 
+	promotedAt := make(map[csdf.Var]int, len(global.Promotes))
 	for _, promotion := range global.Promotes {
+		if line, ok := promotedAt[promotion.Map]; ok {
+			// Two promotions of one map would each frame the other out, so
+			// neither expansion says what the map does.
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Line:     promotion.Line,
+				Message:  fmt.Sprintf("promote via %q: the map is already promoted at line %d", promotion.Map, line),
+			})
+			continue
+		}
+		promotedAt[promotion.Map] = promotion.Line
+
 		promoted, promoteDiags := expandPromote(global, promotion, load)
 		diags = append(diags, promoteDiags...)
 		edges = append(edges, promoted...)

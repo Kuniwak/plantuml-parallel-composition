@@ -73,3 +73,246 @@ open --> none : CLOSE
 		t.Errorf("Expand() left directives on the diagram")
 	}
 }
+
+func TestExpandFramesTheOtherMapsAndKeepsTauSilent(t *testing.T) {
+	// Arrange: a global state with a second map, so that every promoted edge
+	// has something to leave alone.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+running : audits ; 監査ID ⇸ Audit
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+state "凍結中" as frozen
+[*] --> none : 残高は 0
+none --> open : OPEN
+open --> frozen : FREEZE(理由) ; 残高が 0 でない ; 凍結理由は 理由
+frozen --> open : tau
+@enduml
+`,
+	})
+
+	// Act
+	result, diags := promote.Expand(global, load)
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+
+	want := []csdf.Edge{
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "FREEZE(口座ID, 理由)",
+			Guard: "口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ∧ 残高が 0 でない",
+			Post:  "accounts' = accounts ⊕ {口座ID ↦ 〈凍結中〉} ∧ 凍結理由は 理由 ∧ audits' = audits",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "OPEN(口座ID)",
+			Guard: "口座ID ∉ dom accounts",
+			Post:  "accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉} ∧ 残高は 0 ∧ audits' = audits",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "tau",
+			Guard: "口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈凍結中〉",
+			Post:  "accounts' = accounts ⊕ {口座ID ↦ 〈開設済み〉} ∧ audits' = audits",
+		},
+	}
+	if diff := cmp.Diff(want, result.Diagram.Edges); diff != "" {
+		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandCopiesThePromotionIntoEveryStateOfTheInClause(t *testing.T) {
+	// Arrange: the same map is driven in two operating modes, and the edge that
+	// switches between them is hand-written.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+state "縮退中" as degraded
+degraded : accounts ; 口座ID ⇸ Account
+[*] --> running
+running --> degraded : DEGRADE ; true ; accounts' = accounts
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in running, degraded
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`,
+	})
+
+	// Act
+	result, diags := promote.Expand(global, load)
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+
+	want := []csdf.Edge{
+		{
+			Src:   "degraded",
+			Dst:   "degraded",
+			Event: "OPEN(口座ID)",
+			Guard: "口座ID ∉ dom accounts",
+			Post:  "accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉}",
+		},
+		{
+			Src:   "running",
+			Dst:   "degraded",
+			Event: "DEGRADE",
+			Guard: "true",
+			Post:  "accounts' = accounts",
+			Line:  7,
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "OPEN(口座ID)",
+			Guard: "口座ID ∉ dom accounts",
+			Post:  "accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉}",
+		},
+	}
+	if diff := cmp.Diff(want, result.Diagram.Edges); diff != "" {
+		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// diagnosticsOf runs Expand and returns its diagnostics of one severity as
+// strings, so that a test can say what it expects without naming line numbers
+// twice.
+func diagnosticsOf(t *testing.T, global *csdf.Diagram, load promote.Loader, severity promote.Severity) []string {
+	t.Helper()
+	_, diags := promote.Expand(global, load)
+	var got []string
+	for _, diag := range diags {
+		if diag.Severity == severity {
+			got = append(got, diag.Message)
+		}
+	}
+	return got
+}
+
+func TestExpandReportsStructuralErrors(t *testing.T) {
+	local := `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`
+
+	type testCase struct {
+		Global  string
+		Sources map[string]string
+		Want    []string
+	}
+
+	testCases := map[string]testCase{
+		"the promoted map is not a state variable of the state": {
+			Global: `@startuml
+state "稼働中" as running
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`promote into "running": the state has no state variable "accounts" to promote through`},
+		},
+		"the in clause names a state that does not exist": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in maintenance
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`promote into "maintenance": no such state in this diagram`},
+		},
+		"the local diagram cannot be read": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/MISSING.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{},
+			Want:    []string{`promote local/MISSING.puml: no such file: "local/MISSING.puml"`},
+		},
+		"the start state of the local diagram holds state variables": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+none : balance
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`},
+			Want: []string{`promote local/ACCOUNT.puml: the start state "none" means that no such instance exists, so it must have no state variables`},
+		},
+		"the local diagram has an end edge": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+open --> [*]
+@enduml
+`},
+			Want: []string{`promote local/ACCOUNT.puml: an end edge cannot be promoted; write a state with no outgoing edge instead`},
+		},
+		"the same map is promoted twice": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+promote local/ACCOUNT.puml as Account via accounts(別の口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": local},
+			Want:    []string{`promote via "accounts": the map is already promoted at line 5`},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			got := diagnosticsOf(t, csdf.MustParse(tc.Global), stubLoader(tc.Sources), promote.SeverityError)
+			if diff := cmp.Diff(tc.Want, got); diff != "" {
+				t.Errorf("errors mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
