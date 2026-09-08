@@ -1,0 +1,19 @@
+@startuml AUDIT
+' CSDF-IGNORE-BEGIN
+!ifndef PROMOTED
+title 監査 1 件のライフサイクル
+!endif
+' CSDF-IGNORE-END
+
+state "未着手" as audIdle
+state "調査中" as audOpen
+audOpen : 対象 ; 口座ID
+state "報告済み" as audDone
+audDone : 対象 ; 口座ID
+
+[*] --> audIdle
+
+audIdle --> audOpen : AUDIT-BEGIN(口座ID) ; true ; 対象は 口座ID
+audOpen --> audDone : AUDIT-REPORT
+audDone --> audIdle : AUDIT-ARCHIVE
+@enduml

@@ -56,21 +56,21 @@ CSDF は状態と状態変数、`event ; guard ; post` のエッジで LTS を�
 !define PROMOTED
 
 state "稼働中" as running {
-  running : whitelistEntries
-  running : buyTrades
-  running : segReportCycles
-  running : sessions
+  running : whitelistEntries ; エントリID ⇸ Whitelist
+  running : buyTrades ; 買い約定ID ⇸ BuyTrade
+  running : segReportCycles ; 基準日 ⇸ SegReport
+  running : sessions ; ユーザー ⇸ Session
 
-  state "whitelistEntries : エントリID ⇸ Whitelist" as whitelistEntries <<promote>> {
+  state "whitelistEntries : エントリID ⇸ Whitelist" as runningWhitelist <<promote>> {
     !include states/WHITELIST_ja.puml
   }
-  state "buyTrades : 買い約定ID ⇸ BuyTrade" as buyTrades <<promote>> {
+  state "buyTrades : 買い約定ID ⇸ BuyTrade" as runningBuy <<promote>> {
     !include states/BUY_ja.puml
   }
-  state "segReportCycles : 基準日 ⇸ SegReport" as segReportCycles <<promote>> {
+  state "segReportCycles : 基準日 ⇸ SegReport" as runningSegReport <<promote>> {
     !include states/SEGREPORT_ja.puml
   }
-  state "sessions : ユーザー ⇸ Session" as sessions <<promote>> {
+  state "sessions : ユーザー ⇸ Session" as runningSession <<promote>> {
     !include states/SESSION_ja.puml
   }
 }
@@ -80,45 +80,43 @@ state "稼働中" as running {
 note as sync1
   sync EVT-CUSTODY-DEPOSIT-UNKNOWN-BOOK : buyTrades(買い約定ID), segReportCycles(基準日)
 end note
-sync1 .. buyTrades
-sync1 .. segReportCycles
 
-note as cons1
+note bottom of runningWhitelist
   constrain EVT-HW-WHITELIST-VERIFY(売り約定ID, 送金先アドレス) ; whitelistEntries の 送金先アドレス が〈登録済み〉
 end note
-cons1 .. whitelistEntries
 
-note as cons2
+note bottom of runningSession
   constrain EVT-WL-CHECKER-APPROVE(エントリID, checker) ; sessions の checker が〈ログイン中〉で役割が checker
 end note
-cons2 .. sessions
-cons2 .. whitelistEntries
 @enduml
 ```
 
-レンダリング結果：「稼働中」の箱の中に家族ごとの箱（見出し `写像 : ID ⇸ 型`）が並び、中身は局所のライフサイクル、共有イベントと制約は該当する箱に線で繋がった注記になる。「箱 1 つ = ID ごとに 1 部」という読みが絵から取れる。
+レンダリング結果：「稼働中」の箱の中に家族ごとの箱（見出し `写像 : ID ⇸ 型`）が並び、中身は局所のライフサイクル、制約は該当する箱に線で繋がった注記、複数の写像に跨る `sync` は浮いた注記になる。「箱 1 つ = ID ごとに 1 部」という読みが絵から取れる。
 
 ### 2.2 宣言と PlantUML 構文の対応
 
 | 宣言 | PlantUML の綴り | 抽出する情報 |
 |---|---|---|
-| `promote` | `state "<map> : <ID> ⇸ <Type>" as <map> <<promote>> { !include <path> }` | 別名 `<map>`＝写像名。見出しから `<ID>`（インスタンス ID のパラメータ名）と `<Type>`。`!include` からパス |
-| `sync` | 先頭行が `sync` で始まる `note as <alias> … end note` | 本文を `syncBody` 文法で解釈 |
-| `constrain` | 先頭行が `constrain` で始まる `note as <alias> … end note` | 本文を `constrainBody` 文法で解釈 |
-| 展開先 | `<<promote>>` 状態を置いた**親の複合状態** | 複数の親に置きたければ、同じ写像の `<<promote>>` ブロックを各親に書く |
+| `promote` | `state "<map> : <ID> ⇸ <Type>" as <alias> <<promote>> { !include <path> }` | **見出し**から写像名 `<map>`・インスタンス ID のパラメータ名 `<ID>`・型 `<Type>`。`!include` からパス |
+| 展開先の追加 | `state "<map> : <ID> ⇸ <Type>" as <alias> <<promote>>`（本体なし） | 見出しの写像名だけ。局所図はその写像の `!include` を持つブロックから取る |
+| `sync` | 最初の非空行が `sync` で始まる `note as <alias> … end note`、または `note <dir> of <state> … end note` | 本文を `syncBody` 文法で解釈 |
+| `constrain` | 最初の非空行が `constrain` で始まる同上の `note` | 本文を `constrainBody` 文法で解釈 |
+| 展開先 | `<<promote>>` 状態を置いた**親の複合状態** | 複数の親に置きたければ、1 つの親にだけ `!include` 付きのブロックを書き、他の親には本体なしのブロックを置く |
 
-`note .. state` の接続線は絵のためだけで、意味は本文から取る（接続先と本文の不一致は lint warning、§4.6）。先頭行が `sync`/`constrain` でない `note` は無視する（描画専用）。
+写像名は**見出しから取る**。PlantUML の別名は図の中で一意でなければならないので、同じ写像を 2 つの親に置くとき別名を揃えられないためである（M0）。
+
+`note` の接続は `note <dir> of <state>` の形でだけ絵に出る。`note as <id>` + `<id> .. <state>` は PlantUML の状態遷移図では構文エラーになるので採らない（M0）。対象が 1 つに定まる `constrain` は前者、複数の写像に跨る `sync` は浮いた `note as <id>` で書く。先頭行が `sync`/`constrain` でない `note` は無視する（描画専用）。
 
 ### 2.3 ABNF（`csdf/promote` の上位互換文法）
 
-core の `diagram` に対し、`stateDecl` の位置に `compositeState`、`edgeDecl` の位置に `noteBlock` / `noteLink` / `preprocessorLine` を許す。
+core の `diagram` に対し、`stateDecl` の位置に `compositeState`、`edgeDecl` の位置に `noteBlock` / `preprocessorLine` を許す。
 
 ```
 globalDiagram   = "@startuml" inlineTrivia 0*1(diagramName) LF trivia
                   *(preprocessorLine trivia)
                   1*((stateDecl / compositeState) trivia)
                   startEdgeDecl trivia
-                  *((edgeDecl / noteBlock / noteLink) trivia)
+                  *((edgeDecl / noteBlock) trivia)
                   0*1(endEdgeDecl trivia)
                   "@enduml" LF
 
@@ -130,20 +128,18 @@ compositeState  = "state" inlineSeparator quotedName inlineSeparator "as" inline
                   ; ネストは promoteBlock のみ許す。一般の階層状態は error。
 
 promoteBlock    = "state" inlineSeparator promoteTitle inlineSeparator "as" inlineSeparator stateID
-                  inlineSeparator "<<promote>>" inlineTrivia "{" LF trivia
-                  includeLine trivia
-                  "}" LF
+                  inlineSeparator "<<promote>>" [inlineTrivia "{" LF trivia includeLine trivia "}"] LF
+                  ; 本体なしは展開先の追加だけを言う（M0：同じ局所図を 2 度 !include すると
+                  ; 状態 ID が衝突して PlantUML が 2 つの箱を 1 つに潰す）
 promoteTitle    = DQUOTE var inlineTrivia ":" inlineTrivia param inlineTrivia "⇸" inlineTrivia typeName DQUOTE
-                  ; stateID は var と一致しなければならない（lint error）
 includeLine     = "!include" inlineSeparator path inlineTrivia LF
 
-noteBlock       = "note" inlineSeparator "as" inlineSeparator noteID inlineTrivia LF
+noteBlock       = "note" inlineSeparator ("as" inlineSeparator noteID / noteAnchor) inlineTrivia LF
                   *(noteLine LF)
                   inlineTrivia "end note" inlineTrivia LF
+noteAnchor      = ("left" / "right" / "top" / "bottom") inlineSeparator "of" inlineSeparator stateID
 noteLine        = *unicode_char_except_LF
                   ; 最初の非空行が "sync" / "constrain" で始まる noteBlock だけを宣言として解釈する
-noteLink        = noteID inlineTrivia ".." inlineTrivia stateID inlineTrivia LF
-                / stateID inlineTrivia ".." inlineTrivia noteID inlineTrivia LF
 
 syncBody        = "sync" inlineSeparator eventName inlineTrivia ":" inlineTrivia mapRef *(inlineTrivia "," inlineTrivia mapRef)
 constrainBody   = "constrain" inlineSeparator eventPattern inlineTrivia ";" inlineTrivia guard
@@ -177,19 +173,19 @@ type GlobalDiagram struct {
     Promotes   []Promote
     Syncs      []Sync
     Constrains []Constrain
-    Notes      []NoteLink     // 描画用。lint の突合にだけ使う
 }
 
 type Promote struct {
     Map     csdf.Var
     IDParam string
     Type    string
-    Path    string
+    Path    string          // 本体なしのブロックでは空
+    Alias   csdf.StateID    // PlantUML の別名。診断の位置に使う
     In      csdf.StateID    // 親の複合状態
 }
 
 type Sync struct {
-    NoteID  string
+    Anchor  Anchor
     Event   string          // 局所イベント名（括弧の前）
     Targets []MapRef
 }
@@ -200,13 +196,15 @@ type MapRef struct {
 }
 
 type Constrain struct {
-    NoteID string
+    Anchor Anchor
     Event  string          // 昇格後イベント名
     Params []string
     Guard  string
 }
 
-type NoteLink struct {
+// Anchor は note の書かれ方。`note as <id>` なら State が空、
+// `note <dir> of <state>` なら State が接続先で、lint の突合に使う。
+type Anchor struct {
     NoteID string
     State  csdf.StateID
 }
@@ -271,9 +269,11 @@ G --> G : e(p₁, p₂, args…) ; GUARD(x₁)[id:=p₁] ∧ GUARD(x₂)[id:=p�
 
 | 種別 | 内容 |
 |---|---|
-| error | `<<promote>>` ブロックの `as` 別名が見出しの写像名と一致しない |
+| error | `<<promote>>` ブロックの見出しが `<map> : <ID> ⇸ <Type>` の形でない |
 | error | `<<promote>>` ブロックの写像が親状態の状態変数にない |
-| error | `<<promote>>` ブロックの中身が `!include` 1 行でない |
+| error | `<<promote>>` ブロックの中身が `!include` 1 行でない（本体なしは可） |
+| error | 1 つの写像に `!include` 付きのブロックが 0 個または 2 個以上ある |
+| error | 同じ写像の `<<promote>>` ブロックどうしで `<ID>` または `<Type>` が食い違う |
 | error | `!include` のパスが解決できない / 局所図が CSDF として読めない |
 | error | `<<promote>>` 以外のネストした複合状態 |
 | error | 局所図の `S₀` が状態変数を持つ |
@@ -289,7 +289,7 @@ G --> G : e(p₁, p₂, args…) ; GUARD(x₁)[id:=p₁] ∧ GUARD(x₂)[id:=p�
 | warning | 局所 start edge に post がある（無視される。省略せよ） |
 | warning | 削除エッジ（`T = S₀`）に post がある（捨てられる。他写像への効果なら `sync` か大局の手書きエッジで） |
 | warning | 同じ局所イベント名が 2 つ以上の局所図にあり `sync` されていない（共有イベントの見落とし） |
-| warning | `sync`/`constrain` の note の接続先（`..`）が本文に現れる写像と一致しない |
+| warning | `note <dir> of <state>` の接続先が本文に現れる写像のブロックでない |
 | warning | `constrain` のガード文に引数名が 1 つも現れない |
 | warning | `<<promote>>` の型名が親状態の該当 `varType` 文字列に現れない |
 | info | 写像を状態変数に持つが `<<promote>>` ブロックを置いていない状態がある（その状態では家族が凍結） |
@@ -299,7 +299,7 @@ warning は stderr、error は exit 1。`-Werror` で warning も exit 1。
 ### 4.7 展開先（複数状態の大局図）
 
 - `<<promote>>` ブロックを置いた親の複合状態がその家族の展開先。省略記法はない（1 状態の大局図でも親を書く。§2.1 の形）。
-- 同じ写像を複数の親に置けば、各親に自己ループ群が出る。写像を状態変数に持つが `<<promote>>` を置かない状態では家族は凍結する（意図的な表現。info）。
+- 同じ写像を複数の親に置けば、各親に自己ループ群が出る。`!include` を書くのは 1 つの親だけで、他の親には本体なしの `<<promote>>` 状態を置く（M0：同じ局所図を 2 度 `!include` すると状態 ID が衝突して PlantUML が 2 つの箱を 1 つに潰す）。写像を状態変数に持つが `<<promote>>` を置かない状態では家族は凍結する（意図的な表現。info）。
 - 親状態間の遷移（モード切替 `running --> maintenance : …`）は手書き。フレーム「すべての写像は不変」も手書き。promotion の外側なので生成しない。
 - **自動展開はしない**：写像を持つ全状態へ暗黙に展開すると、メンテナンス中でも約定が進む仕様が黙って生まれる。
 
@@ -366,11 +366,12 @@ core への変更は「ヒント付きエラー」だけに限定する。ヒン
    - 日本語テンプレート
 3. **lint テスト**：§4.6 の各行に 1 ケース。
 4. **core の拒否**：宣言入りの大局図を各ツールに渡し、ヒント付きエラーを確認。
-5. **PlantUML スモークテスト**：`examples/promote/` の各大局図を `plantuml -checkonly`（または実レンダリング）に通す。特に確認する点：
-   - `!include` した局所図の `@startuml`/`@enduml` が剥がされて取り込まれる（剥がされなければ `!startsub`/`!includesub` に切り替える）
-   - `!ifndef PROMOTED` で局所の `title`/`note` が消える
+5. **PlantUML スモークテスト**：`csdf/promote/rendercheck` が `examples/promote/*.puml` を `plantuml -checkonly` に通す。PlantUML がなければ skip、CI の `CSDF_REQUIRE_PLANTUML` を立てた job では失敗する（`provercheck` と同じ作法）。M0 で確認済みの点：
+   - `!include` した局所図の `@startuml`/`@enduml` は剥がされて取り込まれる（`!startsub`/`!includesub` は要らない）
+   - `!ifndef PROMOTED` で局所の `title` が消える。局所図側では `CSDF-IGNORE-BEGIN`/`-END` で囲って core パーサからも隠す
    - 複合状態ごとの `[*]` が描ける
-   - `note .. state` の接続線が描ける
+   - `note <dir> of <state>` は描けるが、`note as <id>` + `<id> .. <state>` は状態遷移図では構文エラー
+   - 同じ局所図を 2 つの複合状態に `!include` すると状態 ID が衝突して 1 つの箱に潰れる
 6. **`csdfrepl`**：展開形を 0-switch でアニメーションできる（写像の値は JSON オブジェクト）。
 7. **列挙形との相互検算**（Phase 2）：有限 ID（2〜3 個）で `csdfrename` + `csdfparallel` の直積を作り、`csdfrefinement -m f` の義務を両方向に生成する。
 
@@ -378,7 +379,7 @@ core への変更は「ヒント付きエラー」だけに限定する。ヒン
 
 | # | 内容 | 受け入れ条件 |
 |---|---|---|
-| M0 | PlantUML スモークテスト（§7-5）を最初に実行する | `!include` の挙動が確定し、§2 の綴り方が固まる |
+| M0 | PlantUML スモークテスト（§7-5）を最初に実行する | 完了。`!include` の挙動が確定し、§2 の綴り方が固まった |
 | M1 | 上位互換パーサ・AST・`-json`・core のヒント付きエラー | 既存 golden test 全通過。§2.1 の例が AST になる |
 | M2 | `promote` のみの展開、lint の error 群、複数状態の大局図 | 単一局所と複数状態の golden test 通過。`csdflivelockfree` / `csdfrepl` に通る |
 | M3 | `sync` / `constrain` / warning・info 群 / `-template` | 全 golden test 通過 |
@@ -395,9 +396,11 @@ core への変更は「ヒント付きエラー」だけに限定する。ヒン
 6. **展開先は親の複合状態で表す**。自動展開なし。写像を持つが `<<promote>>` を置かない状態は凍結（info）。
 7. **宣言は PlantUML ネイティブ構文**。独自行は入れない。手書きの大局図はレンダリング可能であること。
 8. **上位互換パーサは `csdf/promote` に置き、core は変えない**。
+9. **写像名は `<<promote>>` の見出しから取る**（別名からではない）。PlantUML の別名は図の中で一意でなければならないため。
+10. **`note` の接続は `note <dir> of <state>` だけ**。`note as <id>` + `<id> .. <state>` は状態遷移図では構文エラー（M0）。
+11. **同じ写像を複数の親に置くときは `!include` を 1 つの親にだけ書く**。他の親は本体なしの `<<promote>>` 状態。2 度 `!include` すると状態 ID が衝突して箱が潰れる（M0）。
 
 ## 10. 未決事項（実装中に判断）
 
-- `!include` が `@startuml` を剥がさない場合の代替（`!startsub`/`!includesub`）。M0 で確定する。
 - `⇸` の ASCII 代替 `->>` を本当に受理するか（PlantUML の見出しに `->>` が出ても描画は問題ない。読みやすさの判断）。
 - `note` の本文に複数の `sync`/`constrain` を書けるようにするか。M3 では 1 note 1 宣言に限定する。
