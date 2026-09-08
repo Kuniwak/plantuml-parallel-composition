@@ -48,7 +48,7 @@ end note
 			global: strings.Replace(syncGlobal, `note as sync1
   sync BOOK : buys(約定ID), cycles(基準日)`, `note bottom of runningCycles
   sync BOOK : buys(約定ID)`, 1),
-			want:   `warning: line 17: this note points at "runningCycles", which is not a block of any map it names`,
+			want: `warning: line 17: this note points at "runningCycles", which is not a block of any map it names`,
 		},
 		"a constrain guard that names no argument": {
 			global: strings.Replace(syncGlobal, "@enduml", `note as c1
