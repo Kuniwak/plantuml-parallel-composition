@@ -59,11 +59,13 @@ $ csdfrepl diagram.png
 `csdfparse` writes one JSON object followed by a newline. Its keys use
 `snake_case`, and optional end edges are represented by `null` when absent.
 State variables are objects with a `name` and an optional `type`. Events are
-free-form strings.
+free-form strings. Every state, edge and directive carries the 1-based `line` it
+was written on. The `promotes`, `syncs` and `constrains` arrays hold the
+promotion directives and are empty — never `null` — for a diagram that has none.
 
 ```console
 $ csdfparse < examples/valid/skip.puml
-{"states":{"s0":{"id":"s0","name":"SKIP","vars":[]}},"start_edge":{"dst":"s0","post":"true"},"edges":[],"end_edge":{"src":"s0","guard":"true"}}
+{"states":{"s0":{"name":"SKIP","vars":[],"line":3}},"start_edge":{"dst":"s0","post":"true","line":5},"edges":[],"end_edge":{"src":"s0","guard":"true","line":6},"promotes":[],"syncs":[],"constrains":[]}
 ```
 
 ## Promotion
