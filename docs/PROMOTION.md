@@ -100,7 +100,17 @@ else follows:
 
 * it holds no state variables (there is nothing to hold) — an error if it does;
 * an edge out of it creates an instance, adding a key to the map;
-* an edge into it deletes one, removing the key.
+* an edge into it deletes one, removing the key;
+* it has no self-loop — an event on an instance that does not exist, leaving it still
+  non-existent, means nothing. An error.
+
+**The post of an edge into or out of the start state is not written on the start edge.**
+The post of the local start edge is ignored (a warning), because the start state holds
+nothing for it to constrain. The initial values of a fresh instance are decided entirely
+by the post of the creation edge `S₀ --> T` that made it, so a local diagram with two
+ways of creating an instance says the initial values of each on its own edge. For the
+same reason the post of a deletion edge `S --> S₀` is discarded (also a warning): there
+is nothing left to say anything about.
 
 An end edge (`--> [*]`) cannot be promoted and is an error. An instance that is finished
 is a state with no outgoing edge, not a diagram that terminates.
@@ -120,8 +130,7 @@ G --> G : e(id, a…) ; id ∈ dom m ∧ m(id) ∈ 〈S〉 ∧ g ; m' = m ⊕ {i
 with two special cases:
 
 * **creation** (`S` is `S₀`): the guard is `id ∉ dom m ∧ g`, and the post is
-  `m' = m ∪ {id ↦ 〈T〉} ∧ p ∧ FRAME`. The post of the local start edge — the initial
-  value of a fresh instance — is conjoined too.
+  `m' = m ∪ {id ↦ 〈T〉} ∧ p ∧ FRAME`. `p` alone gives the initial values.
 * **deletion** (`T` is `S₀`): the post is `m' = {id} ⩤ m ∧ FRAME`. The local post is
   **discarded**: the absent state holds nothing for it to talk about. Writing one is a
   warning, not an error.
@@ -200,7 +209,7 @@ replaces them clause by clause with a Go `text/template` file; a clause the file
 not redefine keeps its symbolic form. A clause that parses but cannot be rendered — a
 field that does not exist, say — is an error, not a phrase: a fault buried in an opaque
 predicate is one nothing downstream can catch. The clauses are `exists`, `absent`, `at`,
-`insert`, `update`, `delete`, `keep` and `unchanged`, and each is given `.Map`, `.ID`,
+`insert`, `update`, `delete` and `unchanged`, and each is given `.Map`, `.ID`,
 `.Src`, `.Dst`, `.Guard`, `.Post`, `.Other` and `.OtherMaps`. A Japanese version ships
 as `examples/promote/templates/ja.tmpl`.
 
@@ -219,6 +228,7 @@ checks without printing.
 | error    | the local diagram cannot be read                                                       |
 | error    | the local start state holds state variables                                            |
 | error    | the local diagram has an end edge                                                      |
+| error    | the local start state has a self-loop                                                  |
 | error    | the same map is promoted twice                                                         |
 | error    | a synced map is not promoted                                                           |
 | error    | a synced event is missing from one of the local diagrams                               |
@@ -232,6 +242,7 @@ checks without printing.
 | warning  | a `sync` directive names a single map                                                  |
 | warning  | the promoted type does not appear in the type of the map                               |
 | warning  | a deletion edge has a local post, which is discarded                                   |
+| warning  | the local start edge has a post, which is ignored                                      |
 | warning  | a `constrain` guard mentions none of its parameters                                    |
 | info     | a state holds the map but is not in the `in` clause, so the map is frozen there        |
 

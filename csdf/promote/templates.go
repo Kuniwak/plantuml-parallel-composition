@@ -22,7 +22,6 @@ import (
 //	insert     the instance is created
 //	update     the instance moves to the local state it goes to
 //	delete     the instance is removed
-//	keep       the instance was absent and stays absent
 //	unchanged  one other state variable of the global state does not move
 //
 // The guard and the post of the local edge are inserted verbatim, and the
@@ -34,7 +33,6 @@ const DefaultTemplates = `
 {{define "insert"}}{{.Map}}' = {{.Map}} ∪ {{printf "{%s ↦ 〈%s〉}" .ID .Dst}}{{end}}
 {{define "update"}}{{.Map}}' = {{.Map}} ⊕ {{printf "{%s ↦ 〈%s〉}" .ID .Dst}}{{end}}
 {{define "delete"}}{{.Map}}' = {{printf "{%s}" .ID}} ⩤ {{.Map}}{{end}}
-{{define "keep"}}{{.Map}}' = {{.Map}}{{end}}
 {{define "unchanged"}}{{.Other}}' = {{.Other}}{{end}}
 `
 

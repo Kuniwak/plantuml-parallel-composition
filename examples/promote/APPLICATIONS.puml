@@ -1,0 +1,8 @@
+@startuml APPLICATIONS
+state "稼働中" as running
+running : applications ; 申込ID ⇸ Application
+
+[*] --> running : applications は空
+
+promote local/APPLICATION.puml as Application via applications(申込ID)
+@enduml

@@ -361,6 +361,31 @@ func checkLocal(promotion csdf.Promote, local *csdf.Diagram) []Diagnostic {
 	}
 
 	absentID := local.StartEdge.Dst
+	if !csdf.IsTrue(local.StartEdge.Post) {
+		// The initial values of an instance belong on the edges that create
+		// one: only they have a state with variables to talk about.
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Line:     promotion.Line,
+			Message: fmt.Sprintf(
+				"promote %s: the start state holds nothing, so the post of its start edge %q is ignored; write the initial values on the edges that create an instance",
+				promotion.Path, local.StartEdge.Post),
+		})
+	}
+
+	for _, localEdge := range local.Edges {
+		if localEdge.Src != absentID || localEdge.Dst != absentID {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityError,
+			Line:     promotion.Line,
+			Message: fmt.Sprintf(
+				"promote %s: the start state 〈%s〉 cannot have a self-loop; it means that no such instance exists, so nothing can happen to it",
+				promotion.Path, stateName(local, absentID)),
+		})
+	}
+
 	for _, localEdge := range local.Edges {
 		if localEdge.Dst != absentID || localEdge.Src == absentID || csdf.IsTrue(localEdge.Post) {
 			continue
@@ -425,9 +450,6 @@ func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csd
 	}
 
 	switch {
-	case creates && deletes:
-		// An event that leaves the instance as absent as it was.
-		post = append(post, render.clause("keep", data))
 	case deletes:
 		post = append(post, render.clause("delete", data))
 	case creates:
@@ -439,10 +461,6 @@ func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csd
 	// nothing for the post to talk about.
 	if !deletes && !csdf.IsTrue(localEdge.Post) {
 		post = append(post, string(localEdge.Post))
-	}
-	// The local start edge is the initial value of a fresh instance.
-	if creates && !deletes && !csdf.IsTrue(local.StartEdge.Post) {
-		post = append(post, string(local.StartEdge.Post))
 	}
 
 	name, args := splitEvent(localEdge.Event)

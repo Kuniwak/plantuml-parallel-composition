@@ -1,0 +1,15 @@
+@startuml APPLICATION
+' Two ways to create an application, ending in different states with different
+' initial values. Each creation edge carries its own post: the start edge has no
+' state to talk about.
+state "なし" as none
+state "審査待ち" as pending
+state "即時承認" as approved
+
+[*] --> none
+
+none --> pending : APPLY(申込書) ; true ; 審査担当は未定で、申込書は 申込書
+none --> approved : APPLY-FAST(申込書) ; 申込者は既存顧客 ; 承認日は今日で、申込書は 申込書
+pending --> approved : APPROVE
+approved --> none : ARCHIVE
+@enduml

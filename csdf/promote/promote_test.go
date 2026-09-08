@@ -112,8 +112,8 @@ promote local/ACCOUNT.puml as Account via accounts(口座ID)
 state "未開設" as none
 state "開設済み" as open
 state "凍結中" as frozen
-[*] --> none : 残高は 0
-none --> open : OPEN
+[*] --> none
+none --> open : OPEN ; true ; 残高は 0
 open --> frozen : FREEZE(理由) ; 残高が 0 でない ; 凍結理由は 理由
 frozen --> open : tau
 @enduml
@@ -938,5 +938,63 @@ sync E : xs(x), ys(y)
 	want := []string{"the event E is synced, but local/Z.puml also has it and is not in the sync; that instance takes it independently"}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
 		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandWarnsThatTheLocalStartPostIsIgnored(t *testing.T) {
+	// Arrange: the start state holds nothing, so a post on the start edge has
+	// no variables to constrain. The initial values belong on the edges that
+	// create an instance.
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none : 残高は 0
+none --> open : OPEN
+@enduml
+`})
+
+	if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+	want := []string{`promote local/ACCOUNT.puml: the start state holds nothing, so the post of its start edge "残高は 0" is ignored; write the initial values on the edges that create an instance`}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+		t.Errorf("warnings mismatch (-want +got):\n%s", diff)
+	}
+
+	result, _ := promote.Expand(global, load, promote.Options{})
+	if got := result.Diagram.Edges[0].Post; strings.Contains(string(got), "残高") {
+		t.Errorf("Edges[0].Post = %q; want the ignored start post left out", got)
+	}
+}
+
+func TestExpandRefusesASelfLoopOnTheLocalStartState(t *testing.T) {
+	// Arrange: an event on an instance that does not exist, leaving it still
+	// non-existent, means nothing.
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> none : REJECT
+none --> open : OPEN
+@enduml
+`})
+
+	want := []string{`promote local/ACCOUNT.puml: the start state 〈未開設〉 cannot have a self-loop; it means that no such instance exists, so nothing can happen to it`}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }

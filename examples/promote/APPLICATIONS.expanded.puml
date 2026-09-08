@@ -1,0 +1,13 @@
+@startuml auto-generated-by: csdfpromote APPLICATIONS.puml
+state "稼働中" as running
+running: applications ; 申込ID ⇸ Application
+[*] --> running : applications は空
+' promote: local/APPLICATION.puml 〈なし〉 → 〈審査待ち〉
+running --> running : APPLY(申込ID, 申込書) ; 申込ID ∉ dom applications ; applications' = applications ∪ {申込ID ↦ 〈審査待ち〉} ∧ 審査担当は未定で、申込書は 申込書
+' promote: local/APPLICATION.puml 〈なし〉 → 〈即時承認〉
+running --> running : APPLY-FAST(申込ID, 申込書) ; 申込ID ∉ dom applications ∧ 申込者は既存顧客 ; applications' = applications ∪ {申込ID ↦ 〈即時承認〉} ∧ 承認日は今日で、申込書は 申込書
+' promote: local/APPLICATION.puml 〈審査待ち〉 → 〈即時承認〉
+running --> running : APPROVE(申込ID) ; 申込ID ∈ dom applications ∧ applications(申込ID) ∈ 〈審査待ち〉 ; applications' = applications ⊕ {申込ID ↦ 〈即時承認〉}
+' promote: local/APPLICATION.puml 〈即時承認〉 → 〈なし〉
+running --> running : ARCHIVE(申込ID) ; 申込ID ∈ dom applications ∧ applications(申込ID) ∈ 〈即時承認〉 ; applications' = {申込ID} ⩤ applications
+@enduml
