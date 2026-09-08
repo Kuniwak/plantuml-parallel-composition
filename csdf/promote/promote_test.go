@@ -705,3 +705,54 @@ frozen --> none : CLOSE
 		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestExpandSyncTakesTheCartesianProduct(t *testing.T) {
+	// Arrange: each side may contribute several edges for the same event, and
+	// a guard on one side can pick out any state on the other, so every
+	// combination is a possible behaviour.
+	two := `@startuml
+state "なし" as none
+state "一つ" as one
+state "二つ" as many
+[*] --> none
+none --> one : E
+one --> many : E
+@enduml
+`
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : xs
+running : ys
+[*] --> running
+promote local/X.puml as X via xs(x)
+promote local/Y.puml as Y via ys(y)
+sync E : xs(x), ys(y)
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/X.puml": two, "local/Y.puml": two})
+
+	// Act
+	result, diags := promote.Expand(global, load, promote.Options{})
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+	if len(result.Diagram.Edges) != 4 {
+		t.Fatalf("len(Edges) = %d; want 4 (2 x 2)", len(result.Diagram.Edges))
+	}
+
+	want := []csdf.Predicate{
+		"x ∈ dom xs ∧ xs(x) ∈ 〈一つ〉 ∧ y ∈ dom ys ∧ ys(y) ∈ 〈一つ〉",
+		"x ∈ dom xs ∧ xs(x) ∈ 〈一つ〉 ∧ y ∉ dom ys",
+		"x ∉ dom xs ∧ y ∈ dom ys ∧ ys(y) ∈ 〈一つ〉",
+		"x ∉ dom xs ∧ y ∉ dom ys",
+	}
+	got := make([]csdf.Predicate, 0, len(result.Diagram.Edges))
+	for _, edge := range result.Diagram.Edges {
+		got = append(got, edge.Guard)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("guards mismatch (-want +got):\n%s", diff)
+	}
+}

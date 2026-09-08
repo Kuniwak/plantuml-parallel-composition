@@ -1,0 +1,12 @@
+@startuml CYCLE
+state "未開始" as idle
+state "集計中" as counting
+state "確定済み" as fixed
+
+[*] --> idle
+
+idle --> counting : BOOK(数量)
+counting --> counting : BOOK(数量)
+counting --> fixed : tau
+fixed --> idle : REPORT
+@enduml

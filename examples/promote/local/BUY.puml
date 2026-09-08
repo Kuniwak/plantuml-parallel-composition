@@ -1,0 +1,11 @@
+@startuml BUY
+state "なし" as none
+state "約定済み" as booked
+state "記帳済み" as posted
+
+[*] --> none
+
+none --> booked : BUY(数量) ; true ; 数量は 数量
+booked --> posted : BOOK(数量)
+posted --> none : SETTLE
+@enduml

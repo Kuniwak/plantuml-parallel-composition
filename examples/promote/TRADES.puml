@@ -1,0 +1,17 @@
+@startuml TRADES
+' Booking a buy trade and counting it into the segregation report of its
+' business day is one event, so the two instances take it together.
+state "稼働中" as running
+running : buys ; 約定ID ⇸ Buy
+running : cycles ; 基準日 ⇸ Cycle
+
+[*] --> running : buys と cycles は空
+
+promote local/BUY.puml as Buy via buys(約定ID)
+promote local/CYCLE.puml as Cycle via cycles(基準日)
+
+sync BOOK : buys(約定ID), cycles(基準日)
+
+constrain BUY(約定ID, 数量) ; 数量 は最小取引単位の倍数である
+constrain BOOK(約定ID, 基準日, 数量) ; 基準日 は 約定ID の約定日である
+@enduml
