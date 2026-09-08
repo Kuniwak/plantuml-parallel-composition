@@ -212,7 +212,19 @@ func checkLocal(promotion csdf.Promote, local *csdf.Diagram) []Diagnostic {
 	return diags
 }
 
-func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge) edgeWithOrigin {
+// edgeParts is one local edge seen through its promotion: the clauses it
+// contributes to the guard and the post of a global edge, and the pieces its
+// event is rebuilt from. A sync merges the parts of several local edges into
+// one global edge, so they are built before an edge is.
+type edgeParts struct {
+	Guard     []string
+	Post      []string
+	EventName string
+	Args      []string
+	Origin    string
+}
+
+func promoteEdgeParts(promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge) edgeParts {
 	absent := local.StartEdge.Dst
 	creates := localEdge.Src == absent
 	deletes := localEdge.Dst == absent
@@ -250,27 +262,40 @@ func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promot
 	if creates && !deletes && !csdf.IsTrue(local.StartEdge.Post) {
 		post = append(post, string(local.StartEdge.Post))
 	}
-	post = append(post, frame(global, target, promotion.Map)...)
+
+	name, args := splitEvent(localEdge.Event)
+	return edgeParts{
+		Guard:     guard,
+		Post:      post,
+		EventName: name,
+		Args:      args,
+		Origin:    fmt.Sprintf("%s 〈%s〉 → 〈%s〉", promotion.Path, stateName(local, localEdge.Src), stateName(local, localEdge.Dst)),
+	}
+}
+
+func expandEdge(global *csdf.Diagram, target csdf.StateID, promotion csdf.Promote, local *csdf.Diagram, localEdge csdf.Edge) edgeWithOrigin {
+	parts := promoteEdgeParts(promotion, local, localEdge)
+	post := append(parts.Post, frame(global, target, promotion.Map)...)
 
 	return edgeWithOrigin{
 		Edge: csdf.Edge{
 			Src:   target,
 			Dst:   target,
-			Event: promoteEvent(localEdge.Event, promotion.IDParam),
-			Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
+			Event: promotedEvent(localEdge.Event, parts.EventName, append([]string{promotion.IDParam}, parts.Args...)),
+			Guard: csdf.Predicate(strings.Join(parts.Guard, " ∧ ")),
 			Post:  csdf.Predicate(strings.Join(post, " ∧ ")),
 		},
-		Origin: fmt.Sprintf("promote: %s 〈%s〉 → 〈%s〉", promotion.Path, stateName(local, localEdge.Src), stateName(local, localEdge.Dst)),
+		Origin: "promote: " + parts.Origin,
 	}
 }
 
 // frame says that the other state variables of the global state do not move.
-// The map being promoted needs no clause of its own: ⊕, ∪ and ⩤ already say
+// The maps being promoted need no clause of their own: ⊕, ∪ and ⩤ already say
 // what happens to every key but the one at hand.
-func frame(global *csdf.Diagram, target csdf.StateID, promoted csdf.Var) []string {
+func frame(global *csdf.Diagram, target csdf.StateID, promoted ...csdf.Var) []string {
 	var clauses []string
 	for _, v := range global.States[target].Vars {
-		if v.Name == promoted {
+		if slices.Contains(promoted, v.Name) {
 			continue
 		}
 		clauses = append(clauses, fmt.Sprintf("%s' = %s", v.Name, v.Name))
@@ -278,23 +303,32 @@ func frame(global *csdf.Diagram, target csdf.StateID, promoted csdf.Var) []strin
 	return clauses
 }
 
-// promoteEvent prefixes the instance id to the arguments of a local event. τ is
-// left alone: giving it an id would make it observable, which is the opposite
-// of what hiding an event means.
-func promoteEvent(event csdf.Event, idParam string) csdf.Event {
-	if event == csdf.Tau {
-		return event
-	}
-
+// splitEvent separates a local event into its name and its argument names.
+func splitEvent(event csdf.Event) (string, []string) {
 	name, args, found := strings.Cut(string(event), "(")
+	name = strings.TrimSpace(name)
 	if !found {
-		return csdf.Event(fmt.Sprintf("%s(%s)", strings.TrimSpace(string(event)), idParam))
+		return name, nil
 	}
-	args = strings.TrimSuffix(strings.TrimSpace(args), ")")
-	if strings.TrimSpace(args) == "" {
-		return csdf.Event(fmt.Sprintf("%s(%s)", strings.TrimSpace(name), idParam))
+	args = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(args), ")"))
+	if args == "" {
+		return name, nil
 	}
-	return csdf.Event(fmt.Sprintf("%s(%s, %s)", strings.TrimSpace(name), idParam, args))
+	parsed := strings.Split(args, ",")
+	for i, arg := range parsed {
+		parsed[i] = strings.TrimSpace(arg)
+	}
+	return name, parsed
+}
+
+// promotedEvent rebuilds an event with the instance ids in front of its
+// arguments. τ is left alone: giving it an id would make it observable, which
+// is the opposite of what hiding an event means.
+func promotedEvent(local csdf.Event, name string, args []string) csdf.Event {
+	if local == csdf.Tau {
+		return local
+	}
+	return csdf.Event(fmt.Sprintf("%s(%s)", name, strings.Join(args, ", ")))
 }
 
 func stateName(d *csdf.Diagram, id csdf.StateID) string {
