@@ -706,12 +706,19 @@ func appendUnique(args []string, arg string) []string {
 // author wrote by hand already says everything they meant it to.
 func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnostic {
 	matched := 0
+	var arities []int
 	for i, edge := range edges {
 		if !edge.Generated {
 			continue
 		}
 		name, args := splitEvent(edge.Edge.Event)
-		if name != constrain.Event || len(args) != len(constrain.Params) {
+		if name != constrain.Event {
+			continue
+		}
+		if !slices.Contains(arities, len(args)) {
+			arities = append(arities, len(args))
+		}
+		if len(args) != len(constrain.Params) {
 			continue
 		}
 		edges[i].Edge.Guard = csdf.Predicate(fmt.Sprintf("%s%s%s", edge.Edge.Guard, Conjunction, constrain.Guard))
@@ -735,8 +742,8 @@ func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnost
 			Severity: SeverityError,
 			Line:     constrain.Line,
 			Message: fmt.Sprintf(
-				"constrain %s/%d: no expanded edge carries that event with that many arguments",
-				constrain.Event, len(constrain.Params)),
+				"constrain %s/%d: no expanded edge carries that event with that many arguments; %s",
+				constrain.Event, len(constrain.Params), arityHint(constrain.Event, arities)),
 		}}
 	}
 	return nil
@@ -831,4 +838,20 @@ func varTypeOf(state csdf.State, name csdf.Var) string {
 		}
 	}
 	return ""
+}
+
+// arityHint says which arities of the event do exist, since an event merged by a
+// sync carries the instance ids of every map it was merged from, plus the local
+// arguments left after those of the same name were merged into one. That count
+// is easier to read off the expansion than to work out from the directives.
+func arityHint(event string, arities []int) string {
+	if len(arities) == 0 {
+		return fmt.Sprintf("no expanded edge carries %s at all", event)
+	}
+	slices.Sort(arities)
+	shown := make([]string, 0, len(arities))
+	for _, arity := range arities {
+		shown = append(shown, fmt.Sprintf("%s/%d", event, arity))
+	}
+	return joinAnd(shown) + " " + plural(len(arities), "does", "do")
 }

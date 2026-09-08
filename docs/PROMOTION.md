@@ -84,7 +84,10 @@ each. See "Synchronised events" below.
 
 Conjoins `<guard>` onto the guard of every expanded edge whose event matches in name
 and in number of arguments. The event is written in its **promoted** form, so its first
-argument is the instance ID. This is where a condition on another map goes — the local
+argument is the instance ID, and for an event merged by a `sync` there is one such
+argument per map, followed by the local arguments that survived the merge by name. Count
+the arguments in the expansion rather than in the local diagram; when the count is
+wrong, the error says which arities do exist. This is where a condition on another map goes — the local
 diagram cannot see one.
 
 `constrain` does not depend on the global state, and it applies to creation edges,

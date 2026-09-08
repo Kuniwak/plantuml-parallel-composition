@@ -518,7 +518,7 @@ none --> open : OPEN
 `,
 	})
 
-	want := []string{"constrain OPEN/2: no expanded edge carries that event with that many arguments"}
+	want := []string{"constrain OPEN/2: no expanded edge carries that event with that many arguments; OPEN/1 does"}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
@@ -994,6 +994,23 @@ none --> open : OPEN
 `})
 
 	want := []string{`promote local/ACCOUNT.puml: the start state 〈未開設〉 cannot have a self-loop; it means that no such instance exists, so nothing can happen to it`}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandReportsAConstraintOnAnEventThatDoesNotExist(t *testing.T) {
+	global := mustParseGlobal(`@startuml
+state "稼働中" as running
+running : xs
+[*] --> running
+promote local/X.puml as X via xs(x)
+constrain NOPE(x) ; なにか
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/X.puml": twoStateLocal})
+
+	want := []string{"constrain NOPE/1: no expanded edge carries that event with that many arguments; no expanded edge carries NOPE at all"}
 	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
