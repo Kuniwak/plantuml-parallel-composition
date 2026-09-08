@@ -423,3 +423,82 @@ counting --> counting : BOOK(数量)
 		}
 	}
 }
+
+func TestExpandConjoinsConstraints(t *testing.T) {
+	// Arrange: a checker may only approve while logged in, which is a fact
+	// about another map and so cannot be written in the local diagram.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+running : sessions ; 利用者 ⇸ Session
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+constrain OPEN(口座ID) ; 申込書が受理されている
+constrain FREEZE(口座ID, 理由) ; 理由 は凍結事由の一覧にある
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+state "凍結中" as frozen
+[*] --> none
+none --> open : OPEN
+open --> frozen : FREEZE(理由)
+@enduml
+`,
+	})
+
+	// Act
+	result, diags := promote.Expand(global, load)
+
+	// Assert
+	if got := promote.Errors(diags); len(got) > 0 {
+		t.Fatalf("Expand() reported errors: %v", got)
+	}
+
+	want := []csdf.Edge{
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "FREEZE(口座ID, 理由)",
+			Guard: "口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ∧ 理由 は凍結事由の一覧にある",
+			Post:  "accounts' = accounts ⊕ {口座ID ↦ 〈凍結中〉} ∧ sessions' = sessions",
+		},
+		{
+			Src:   "running",
+			Dst:   "running",
+			Event: "OPEN(口座ID)",
+			Guard: "口座ID ∉ dom accounts ∧ 申込書が受理されている",
+			Post:  "accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉} ∧ sessions' = sessions",
+		},
+	}
+	if diff := cmp.Diff(want, result.Diagram.Edges); diff != "" {
+		t.Errorf("Expand() edges mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestExpandReportsAConstraintThatMatchesNothing(t *testing.T) {
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+constrain OPEN(口座ID, 理由) ; なにか
+@enduml
+`)
+	load := stubLoader(map[string]string{
+		"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`,
+	})
+
+	want := []string{"constrain OPEN/2: no expanded edge carries that event with that many arguments"}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityError)); diff != "" {
+		t.Errorf("errors mismatch (-want +got):\n%s", diff)
+	}
+}

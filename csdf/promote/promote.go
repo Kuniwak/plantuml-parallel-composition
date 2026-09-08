@@ -131,6 +131,10 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 		}
 	}
 
+	for _, constrain := range global.Constrains {
+		diags = append(diags, applyConstrain(constrain, edges)...)
+	}
+
 	slices.SortFunc(edges, func(a, b edgeWithOrigin) int {
 		return csdf.CompareEdge(a.Edge, b.Edge)
 	})
@@ -519,4 +523,33 @@ func appendUnique(args []string, arg string) []string {
 		return args
 	}
 	return append(args, arg)
+}
+
+// applyConstrain conjoins the constraint onto every expanded edge whose event
+// matches it in name and arity. Only expanded edges are touched: an edge the
+// author wrote by hand already says everything they meant it to.
+func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnostic {
+	matched := 0
+	for i, edge := range edges {
+		if edge.Origin == "" {
+			continue
+		}
+		name, args := splitEvent(edge.Edge.Event)
+		if name != constrain.Event || len(args) != len(constrain.Params) {
+			continue
+		}
+		edges[i].Edge.Guard = csdf.Predicate(fmt.Sprintf("%s ∧ %s", edge.Edge.Guard, constrain.Guard))
+		matched++
+	}
+
+	if matched == 0 {
+		return []Diagnostic{{
+			Severity: SeverityError,
+			Line:     constrain.Line,
+			Message: fmt.Sprintf(
+				"constrain %s/%d: no expanded edge carries that event with that many arguments",
+				constrain.Event, len(constrain.Params)),
+		}}
+	}
+	return nil
 }
