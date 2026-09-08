@@ -182,6 +182,12 @@ where a condition on another map goes; the local diagram cannot see one.
 Hand-written edges are left alone: they already say everything they were meant
 to.
 
+A constrain reaches **every** matching generated edge, in every state. The block
+its note points at is a drawing: it tells a reader which family the condition is
+about, and it narrows nothing. A parameter of the constrain that no matching
+edge takes is a warning — a mistyped name would otherwise be a free variable
+sitting in a guard, and nothing else would notice.
+
 `tau` is promoted without an instance ID — an internal event with an argument is
 an observable one — and the instance is implicitly existentially quantified.
 Syncing `tau` is an error. A promoted `tau` is a self-loop, so
@@ -241,7 +247,52 @@ Diagnostics
 An `error` leaves the diagram unprinted, so an unsound expansion never reaches
 the tools downstream. A `warning` and an `info` go to standard error and let the
 expansion through; `-Werror` makes a warning fatal. `-lint-only` checks without
-printing.
+printing. They are reported in source order.
+
+Errors:
+
+| What                                                                    | Why                                                                            |
+|:------------------------------------------------------------------------|:--------------------------------------------------------------------------------|
+| A `<<promote>>` title that is not `<map> : <ID> ⇸ <Type>`                | There is no map to promote into.                                                |
+| A `<<promote>>` body that is not one `!include`                          | A block names one local diagram or none.                                        |
+| A `<<promote>>` block outside any state                                  | The state it is written in is where the family moves.                           |
+| A map the state holds no variable for                                    | There is nowhere for the instances to live.                                     |
+| The same map promoted twice in one state                                 | The second block says nothing the first does not.                               |
+| No `!include`, or two, across a map's blocks                             | One local diagram per map; two copies collide on every state ID.                 |
+| Blocks of one map that disagree on the ID or the type                    | They are one family, so they are one shape.                                     |
+| A composite state nested in another                                      | Only a `<<promote>>` block may be nested.                                       |
+| A local `S₀` that holds state variables                                  | `S₀` means that the instance does not exist.                                    |
+| A local end edge                                                         | Completion is a state with no transition out of it.                             |
+| A local `S₀` self-loop                                                   | It is an event of an instance that is not there.                                |
+| A local creation edge on `tau`                                           | Its instance is only existentially quantified, so instances would appear freely. |
+| One state ID declared by two local diagrams                              | `!include` drops them into one namespace.                                       |
+| A `sync` of `tau`                                                        | An internal event two families take together is an observable one.              |
+| A `sync` naming one map twice                                            | One edge moves one key of one map.                                              |
+| A `sync` of a map that is not promoted, or of an event a side lacks      | There is nothing to merge.                                                      |
+| A `sync` whose maps never move in the same state                         | The event they take together can never happen.                                  |
+| A `constrain` no generated edge matches in name and arity                | It constrains nothing.                                                          |
+| A note holding a second directive                                        | One note, one directive.                                                        |
+| A directive body that does not parse                                     | —                                                                               |
+
+Warnings:
+
+| What                                                                    | Why                                                                              |
+|:------------------------------------------------------------------------|:----------------------------------------------------------------------------------|
+| A post on the local start edge, or on a deletion edge                    | It is dropped: there is no instance for it to be about.                           |
+| An event two local diagrams have that no `sync` names                    | Two families that name an event alike usually mean to take it together.           |
+| A `sync` side whose edges do not all take the same arguments             | The merged event's arity would depend on the combination.                         |
+| A `constrain` argument the matching edges do not take                    | A mistyped name would sit in the guard as a free variable.                        |
+| A `constrain` guard naming none of its own arguments                     | It says nothing about the instance.                                               |
+| A note pointing at a block of a map its `sync` does not name             | The line drawn is misleading.                                                     |
+| A `<<promote>>` type the state variable does not mention                 | One of the two is out of date.                                                    |
+| A note whose first word is a directive's name in another case            | `Sync` is not `sync`, and it would be drawn as prose.                             |
+
+Info:
+
+| What                                                                    | Why                                                                              |
+|:------------------------------------------------------------------------|:----------------------------------------------------------------------------------|
+| A state holding a map with no `<<promote>>` block for it                 | The family is frozen there, which may well be meant.                              |
+| An `!include` outside a `<<promote>>` block                              | It names no local diagram and is dropped.                                         |
 
 Every other tool refuses a diagram that still holds directives: the core grammar
 has no rule for them, and the parse error says to run `csdfpromote` first.
