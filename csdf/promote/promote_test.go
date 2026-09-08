@@ -502,3 +502,135 @@ none --> open : OPEN
 		t.Errorf("errors mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestExpandReportsWarnings(t *testing.T) {
+	type testCase struct {
+		Global  string
+		Sources map[string]string
+		Want    []string
+	}
+
+	testCases := map[string]testCase{
+		"a shared event is not synced": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+running : audits
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+promote local/AUDIT.puml as Audit via audits(監査ID)
+@enduml
+`,
+			Sources: map[string]string{
+				"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`,
+				"local/AUDIT.puml": `@startuml
+state "なし" as none
+state "記録済み" as done
+[*] --> none
+none --> done : OPEN
+@enduml
+`,
+			},
+			Want: []string{`the event OPEN is in local/ACCOUNT.puml and local/AUDIT.puml but is not synced; the instances take it independently`},
+		},
+		"the promoted type is not the type of the map": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ 口座
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`},
+			Want: []string{`promote as Account: the type of "accounts" is "口座ID ⇸ 口座", which does not mention Account`},
+		},
+		"a deletion discards the local post": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+open --> none : CLOSE ; true ; 解約日は今日
+@enduml
+`},
+			Want: []string{`promote local/ACCOUNT.puml: the edge 〈開設済み〉 → 〈未開設〉 deletes the instance, so its post "解約日は今日" is discarded`},
+		},
+		"a constraint mentions none of its parameters": {
+			Global: `@startuml
+state "稼働中" as running
+running : accounts
+[*] --> running
+promote local/ACCOUNT.puml as Account via accounts(口座ID)
+constrain OPEN(口座ID) ; 受付時間内である
+@enduml
+`,
+			Sources: map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`},
+			Want: []string{`constrain OPEN/1: the guard mentions none of its parameters (口座ID)`},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			global := csdf.MustParse(tc.Global)
+			load := stubLoader(tc.Sources)
+			if got := diagnosticsOf(t, global, load, promote.SeverityError); len(got) > 0 {
+				t.Fatalf("Expand() reported errors: %v", got)
+			}
+			if diff := cmp.Diff(tc.Want, diagnosticsOf(t, global, load, promote.SeverityWarning)); diff != "" {
+				t.Errorf("warnings mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestExpandReadsBackAFrozenMap(t *testing.T) {
+	// Arrange: the map is a state variable of both states, but the promotion
+	// only drives it in one, so it is frozen in the other.
+	global := csdf.MustParse(`@startuml
+state "稼働中" as running
+running : accounts ; 口座ID ⇸ Account
+state "保守中" as maintenance
+maintenance : accounts ; 口座ID ⇸ Account
+[*] --> running
+running --> maintenance : ENTER ; true ; accounts' = accounts
+promote local/ACCOUNT.puml as Account via accounts(口座ID) in running
+@enduml
+`)
+	load := stubLoader(map[string]string{"local/ACCOUNT.puml": `@startuml
+state "未開設" as none
+state "開設済み" as open
+[*] --> none
+none --> open : OPEN
+@enduml
+`})
+
+	want := []string{`promote via "accounts": the state "maintenance" holds the map but is not in the in clause, so the map is frozen there`}
+	if diff := cmp.Diff(want, diagnosticsOf(t, global, load, promote.SeverityInfo)); diff != "" {
+		t.Errorf("info mismatch (-want +got):\n%s", diff)
+	}
+}

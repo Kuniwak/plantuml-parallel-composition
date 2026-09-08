@@ -131,6 +131,8 @@ func Expand(global *csdf.Diagram, load Loader) (*Result, []Diagnostic) {
 		}
 	}
 
+	diags = append(diags, checkSharedEvents(global, promotions, order)...)
+
 	for _, constrain := range global.Constrains {
 		diags = append(diags, applyConstrain(constrain, edges)...)
 	}
@@ -218,6 +220,33 @@ func resolvePromote(global *csdf.Diagram, promotion csdf.Promote, load Loader) (
 		valid = append(valid, target)
 	}
 
+	for _, state := range csdf.SortedStates(global.States) {
+		if !hasVar(state.State, promotion.Map) || slices.Contains(valid, state.ID) {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityInfo,
+			Line:     promotion.Line,
+			Message: fmt.Sprintf(
+				"promote via %q: the state %q holds the map but is not in the in clause, so the map is frozen there",
+				promotion.Map, state.ID),
+		})
+	}
+
+	if len(valid) > 0 {
+		// The type of a state variable is free text, so the most that can be
+		// said is that it does not mention the type being promoted.
+		if varType := varTypeOf(global.States[valid[0]], promotion.Map); varType != "" && !strings.Contains(varType, promotion.Type) {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Line:     promotion.Line,
+				Message: fmt.Sprintf(
+					"promote as %s: the type of %q is %q, which does not mention %s",
+					promotion.Type, promotion.Map, varType, promotion.Type),
+			})
+		}
+	}
+
 	local, err := load(promotion.Path)
 	if err != nil {
 		diags = append(diags, Diagnostic{
@@ -246,6 +275,20 @@ func checkLocal(promotion csdf.Promote, local *csdf.Diagram) []Diagnostic {
 			Message: fmt.Sprintf(
 				"promote %s: the start state %q means that no such instance exists, so it must have no state variables",
 				promotion.Path, local.StartEdge.Dst),
+		})
+	}
+
+	absentID := local.StartEdge.Dst
+	for _, localEdge := range local.Edges {
+		if localEdge.Dst != absentID || localEdge.Src == absentID || csdf.IsTrue(localEdge.Post) {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Line:     promotion.Line,
+			Message: fmt.Sprintf(
+				"promote %s: the edge 〈%s〉 → 〈%s〉 deletes the instance, so its post %q is discarded",
+				promotion.Path, stateName(local, localEdge.Src), stateName(local, localEdge.Dst), localEdge.Post),
 		})
 	}
 
@@ -542,6 +585,18 @@ func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnost
 		matched++
 	}
 
+	if matched > 0 && !mentionsAny(string(constrain.Guard), constrain.Params) {
+		// The guard is opaque, so the most that can be said is that it never
+		// names what it was given to talk about.
+		return []Diagnostic{{
+			Severity: SeverityWarning,
+			Line:     constrain.Line,
+			Message: fmt.Sprintf(
+				"constrain %s/%d: the guard mentions none of its parameters (%s)",
+				constrain.Event, len(constrain.Params), strings.Join(constrain.Params, ", ")),
+		}}
+	}
+
 	if matched == 0 {
 		return []Diagnostic{{
 			Severity: SeverityError,
@@ -552,4 +607,72 @@ func applyConstrain(constrain csdf.Constrain, edges []edgeWithOrigin) []Diagnost
 		}}
 	}
 	return nil
+}
+
+// checkSharedEvents reads back the local event names that appear in more than
+// one local diagram without a sync directive. Sharing a name and yet taking the
+// event independently is legitimate, but it is more often an oversight.
+func checkSharedEvents(global *csdf.Diagram, promotions map[csdf.Var]*resolvedPromote, order []csdf.Var) []Diagnostic {
+	synced := make(map[string]bool, len(global.Syncs))
+	for _, sync := range global.Syncs {
+		synced[sync.Event] = true
+	}
+
+	var events []string
+	paths := make(map[string][]string)
+	for _, name := range order {
+		promotion := promotions[name]
+		seen := make(map[string]bool)
+		for _, localEdge := range promotion.Local.Edges {
+			eventName, _ := splitEvent(localEdge.Event)
+			if eventName == string(csdf.Tau) || seen[eventName] {
+				continue
+			}
+			seen[eventName] = true
+			if len(paths[eventName]) == 0 {
+				events = append(events, eventName)
+			}
+			paths[eventName] = append(paths[eventName], promotion.Promote.Path)
+		}
+	}
+	slices.Sort(events)
+
+	var diags []Diagnostic
+	for _, event := range events {
+		if synced[event] || len(paths[event]) < 2 {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Severity: SeverityWarning,
+			Message: fmt.Sprintf(
+				"the event %s is in %s but is not synced; the instances take it independently",
+				event, joinAnd(paths[event])),
+		})
+	}
+	return diags
+}
+
+func joinAnd(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
+func mentionsAny(text string, names []string) bool {
+	for _, name := range names {
+		if strings.Contains(text, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func varTypeOf(state csdf.State, name csdf.Var) string {
+	for _, v := range state.Vars {
+		if v.Name == name {
+			return v.Type
+		}
+	}
+	return ""
 }
