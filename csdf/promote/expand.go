@@ -102,7 +102,7 @@ func (e *expander) run() (*Expansion, []Diagnostic, error) {
 			continue
 		}
 		for _, edge := range local.Edges {
-			expanded, origin := e.promoteEdge(p, local, edge)
+			expanded, origin := e.promoteEdge(p, edge)
 			out.Edges = append(out.Edges, expanded)
 			origins = append(origins, origin)
 		}
@@ -113,78 +113,134 @@ func (e *expander) run() (*Expansion, []Diagnostic, error) {
 	return x, e.diags, nil
 }
 
-// promoteEdge lifts one local edge onto the global state the block was written
-// in, and returns the comment that says where it came from.
-func (e *expander) promoteEdge(p Promote, local *csdf.Diagram, edge csdf.Edge) (csdf.Edge, string) {
+// edgeParts is one local edge promoted through one map: the clauses it
+// contributes to a global edge, and what it needs to name itself.
+type edgeParts struct {
+	guard []string
+	post  []string
+	name  string   // The event name, without its arguments.
+	args  []string // The event's own arguments, after the instance ID.
+	id    string   // The parameter the instance ID is written as.
+	tau   bool
+	src   string // The local source state's name, for the origin comment.
+	dst   string // The local destination state's name.
+}
+
+// parts promotes one local edge through map p, writing the instance ID as id.
+// The clauses are not joined here: a synced edge is the conjunction of the parts
+// of one local edge per map, and a plain one is the conjunction of just this.
+func (e *expander) parts(p Promote, edge csdf.Edge, id string) edgeParts {
+	local := e.locals[p.Map]
 	absent := local.StartEdge.Dst
 	src, dst := local.States[edge.Src], local.States[edge.Dst]
 
-	var guard, post []string
+	parts := edgeParts{src: src.Name, dst: dst.Name, id: id, tau: edge.Event == csdf.Tau}
+	parts.name, parts.args = splitEvent(edge.Event)
+
 	switch {
 	case edge.Src == absent: // Creation: the instance starts to exist.
-		guard = append(guard, fmt.Sprintf("%s ∉ dom %s", p.IDParam, p.Map))
-		post = append(post, fmt.Sprintf("%s' = %s ∪ {%s ↦ 〈%s〉}", p.Map, p.Map, p.IDParam, dst.Name))
+		parts.guard = append(parts.guard, fmt.Sprintf("%s ∉ dom %s", id, p.Map))
+		parts.post = append(parts.post, fmt.Sprintf("%s' = %s ∪ {%s ↦ 〈%s〉}", p.Map, p.Map, id, dst.Name))
 
 	case edge.Dst == absent: // Deletion: the instance stops existing.
-		guard = append(guard,
-			fmt.Sprintf("%s ∈ dom %s", p.IDParam, p.Map),
-			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, p.IDParam, src.Name))
-		post = append(post, fmt.Sprintf("%s' = {%s} ⩤ %s", p.Map, p.IDParam, p.Map))
+		parts.guard = append(parts.guard,
+			fmt.Sprintf("%s ∈ dom %s", id, p.Map),
+			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, id, src.Name))
+		parts.post = append(parts.post, fmt.Sprintf("%s' = {%s} ⩤ %s", p.Map, id, p.Map))
 
 	default:
-		guard = append(guard,
-			fmt.Sprintf("%s ∈ dom %s", p.IDParam, p.Map),
-			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, p.IDParam, src.Name))
-		post = append(post, fmt.Sprintf("%s' = %s ⊕ {%s ↦ 〈%s〉}", p.Map, p.Map, p.IDParam, dst.Name))
+		parts.guard = append(parts.guard,
+			fmt.Sprintf("%s ∈ dom %s", id, p.Map),
+			fmt.Sprintf("%s(%s) ∈ 〈%s〉", p.Map, id, src.Name))
+		parts.post = append(parts.post, fmt.Sprintf("%s' = %s ⊕ {%s ↦ 〈%s〉}", p.Map, p.Map, id, dst.Name))
 	}
 
 	if !csdf.IsTrue(edge.Guard) {
-		guard = append(guard, string(edge.Guard))
+		parts.guard = append(parts.guard, string(edge.Guard))
 	}
 	// The post of a deletion says something about an instance that is gone, so
 	// it is dropped rather than carried into the expansion.
 	if !csdf.IsTrue(edge.Post) && edge.Dst != absent {
-		post = append(post, string(edge.Post))
+		parts.post = append(parts.post, string(edge.Post))
 	}
-	post = append(post, e.frame(p)...)
+	return parts
+}
+
+// promoteEdge lifts one local edge onto the state its block was written in.
+func (e *expander) promoteEdge(p Promote, edge csdf.Edge) (csdf.Edge, string) {
+	parts := e.parts(p, edge, p.IDParam)
+	out := e.compose(p.In, []edgeParts{parts}, p.Map)
+	return out, fmt.Sprintf("promote: %s 〈%s〉 → 〈%s〉", e.paths[p.Map], parts.src, parts.dst)
+}
+
+// compose joins the parts of one or more local edges into one global self-loop
+// on state g, framing every state variable of g but the maps the parts moved.
+func (e *expander) compose(g csdf.StateID, parts []edgeParts, moved ...csdf.Var) csdf.Edge {
+	var guard, post, ids, args []string
+	tau := false
+
+	for _, part := range parts {
+		guard = append(guard, part.guard...)
+		post = append(post, part.post...)
+		tau = tau || part.tau
+		if !part.tau {
+			ids = appendUnique(ids, part.id)
+			args = appendUnique(args, part.args...)
+		}
+	}
+	post = append(post, e.frame(g, moved)...)
+
+	event := csdf.Tau
+	if !tau {
+		event = csdf.Event(fmt.Sprintf("%s(%s)", parts[0].name, strings.Join(append(ids, args...), ", ")))
+	}
 
 	return csdf.Edge{
-		Src:   p.In,
-		Dst:   p.In,
-		Event: promoteEvent(edge.Event, p.IDParam),
+		Src:   g,
+		Dst:   g,
+		Event: event,
 		Guard: csdf.Predicate(strings.Join(guard, " ∧ ")),
 		Post:  csdf.Predicate(strings.Join(post, " ∧ ")),
-	}, fmt.Sprintf("promote: %s 〈%s〉 → 〈%s〉", e.paths[p.Map], src.Name, dst.Name)
+	}
+}
+
+// splitEvent takes a local event apart into its name and its arguments. An event
+// is a free string, so this is a convention rather than grammar: what is not of
+// this shape is a name with no arguments.
+func splitEvent(event csdf.Event) (string, []string) {
+	m := eventRe.FindStringSubmatch(string(event))
+	if m == nil {
+		return strings.TrimSpace(string(event)), nil
+	}
+	if m[2] == "" {
+		return m[1], nil
+	}
+	return m[1], splitTrimmed(m[2])
+}
+
+// appendUnique appends the values that are not in dst yet. Arguments of one name
+// mean one thing, which is how a synced event ends up with one of each.
+func appendUnique(dst []string, values ...string) []string {
+	for _, v := range values {
+		if !slices.Contains(dst, v) {
+			dst = append(dst, v)
+		}
+	}
+	return dst
 }
 
 // frame says that the state variables this edge does not touch are unchanged.
-// The map itself is not framed: ⊕, ∪ and ⩤ already say what happens to every
+// The maps it moved are not framed: ⊕, ∪ and ⩤ already say what happens to every
 // key but the one the edge is about.
-func (e *expander) frame(p Promote) []string {
+func (e *expander) frame(g csdf.StateID, moved []csdf.Var) []string {
 	var clauses []string
-	for _, v := range e.global.Core.States[p.In].Vars {
-		if v.Name == p.Map {
+	for _, v := range e.global.Core.States[g].Vars {
+		if slices.Contains(moved, v.Name) {
 			continue
 		}
 		clauses = append(clauses, fmt.Sprintf("%s' = %s", v.Name, v.Name))
 	}
 	return clauses
-}
-
-// promoteEvent writes the instance ID in as the event's first argument. A tau is
-// left alone: an internal event with an argument is an observable one, and the
-// instance it happens to is implicitly existentially quantified.
-func promoteEvent(event csdf.Event, id string) csdf.Event {
-	if event == csdf.Tau {
-		return event
-	}
-	if m := eventRe.FindStringSubmatch(string(event)); m != nil {
-		if m[2] == "" {
-			return csdf.Event(fmt.Sprintf("%s(%s)", m[1], id))
-		}
-		return csdf.Event(fmt.Sprintf("%s(%s, %s)", m[1], id, m[2]))
-	}
-	return csdf.Event(fmt.Sprintf("%s(%s)", strings.TrimSpace(string(event)), id))
 }
 
 // sortEdges puts the edges in the canonical order, carrying each origin comment
