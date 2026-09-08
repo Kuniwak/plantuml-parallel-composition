@@ -21,6 +21,9 @@ var (
 	noteAnchoredRe  = regexp.MustCompile(`^note\s+(?:left|right|top|bottom)\s+of\s+([\w-]+)$`)
 	noteEndRe       = regexp.MustCompile(`^end\s+note$`)
 	promoteTitleRe  = regexp.MustCompile(`^(\S+)\s*:\s*(.+?)\s*(?:⇸|->>)\s*(\S+)$`)
+	syncBodyRe      = regexp.MustCompile(`^sync\s+([^(;:]+?)\s*:\s*(.+)$`)
+	constrainBodyRe = regexp.MustCompile(`^constrain\s+([^(;]+?)\s*\(([^()]*)\)\s*;\s*(.+)$`)
+	mapRefRe        = regexp.MustCompile(`^([^\s()]+)\s*\(([^()]*)\)$`)
 )
 
 // ParseGlobal reads a global diagram written in the upper-compatible grammar.
@@ -75,6 +78,13 @@ func (s *scanner) run() error {
 
 		case compositeOpenRe.MatchString(text):
 			n, err := s.readComposite(i)
+			if err != nil {
+				return err
+			}
+			i = n
+
+		case noteFloatingRe.MatchString(text), noteAnchoredRe.MatchString(text):
+			n, err := s.readNote(i)
 			if err != nil {
 				return err
 			}
@@ -201,4 +211,97 @@ func unquote(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// readNote lifts one note out of the source. A note whose first non-empty line
+// starts with "sync" or "constrain" is a directive; any other note is there for
+// the picture alone and is dropped without comment.
+func (s *scanner) readNote(i int) (int, error) {
+	open := i + 1
+	text := strings.TrimSpace(s.lines[i])
+
+	var anchor Anchor
+	if m := noteFloatingRe.FindStringSubmatch(text); m != nil {
+		anchor.NoteID = m[1]
+	} else {
+		anchor.State = csdf.StateID(noteAnchoredRe.FindStringSubmatch(text)[1])
+	}
+
+	end := i + 1
+	for end < len(s.lines) && !noteEndRe.MatchString(strings.TrimSpace(s.lines[end])) {
+		end++
+	}
+	if end >= len(s.lines) {
+		return 0, fmt.Errorf("line %d: unterminated note", open)
+	}
+
+	for body := i + 1; body < end; body++ {
+		line := strings.TrimSpace(s.lines[body])
+		if line == "" {
+			continue
+		}
+		if err := s.readDirective(line, anchor, body+1); err != nil {
+			return 0, err
+		}
+		break
+	}
+
+	s.blank(end - i + 1)
+	return end + 1, nil
+}
+
+// readDirective interprets the first line of a note. Anything that is not a
+// directive is a note the author wrote for the reader, so it is left alone.
+func (s *scanner) readDirective(line string, anchor Anchor, at int) error {
+	switch {
+	case strings.HasPrefix(line, "sync"):
+		m := syncBodyRe.FindStringSubmatch(line)
+		if m == nil {
+			return fmt.Errorf("line %d: expected \"sync <event> : <map>(<param>), ...\", got %q", at, line)
+		}
+		targets, err := parseMapRefs(m[2], at)
+		if err != nil {
+			return err
+		}
+		s.syncs = append(s.syncs, Sync{Anchor: anchor, Event: m[1], Targets: targets, Line: at})
+
+	case strings.HasPrefix(line, "constrain"):
+		m := constrainBodyRe.FindStringSubmatch(line)
+		if m == nil {
+			return fmt.Errorf("line %d: expected \"constrain <event>(<param>, ...) ; <guard>\", got %q", at, line)
+		}
+		s.constrains = append(s.constrains, Constrain{
+			Anchor: anchor,
+			Event:  m[1],
+			Params: splitTrimmed(m[2]),
+			Guard:  csdf.Predicate(strings.TrimSpace(m[3])),
+			Line:   at,
+		})
+	}
+	return nil
+}
+
+func parseMapRefs(s string, at int) ([]MapRef, error) {
+	refs := make([]MapRef, 0, 2)
+	for _, part := range splitTrimmed(s) {
+		m := mapRefRe.FindStringSubmatch(part)
+		if m == nil {
+			return nil, fmt.Errorf("line %d: expected \"<map>(<param>)\", got %q", at, part)
+		}
+		refs = append(refs, MapRef{Map: csdf.Var(m[1]), Param: strings.TrimSpace(m[2])})
+	}
+	return refs, nil
+}
+
+// splitTrimmed splits a comma-separated list. Commas cannot be nested here: a
+// map reference holds one parameter and an event pattern holds bare names.
+func splitTrimmed(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
