@@ -154,7 +154,21 @@ func (d *Diagram) Clone() *Diagram {
 	}
 }
 
+// NoEdgeComment is the hook of a diagram that says nothing above its edges.
+func NoEdgeComment(int) string { return "" }
+
 func (d *Diagram) String() string {
+	return d.StringWithEdgeComments(NoEdgeComment)
+}
+
+// StringWithEdgeComments prints the diagram, calling before with the index of
+// each edge and writing what it returns as a line comment above that edge. An
+// empty string prints nothing there; pass NoEdgeComment to print nothing at all.
+//
+// The hook exists for csdfpromote, which says above every edge it generated
+// which local edge it came from. Without it that tool would have to repeat this
+// printer, and the copy would drift.
+func (d *Diagram) StringWithEdgeComments(before func(i int) string) string {
 	var sb strings.Builder
 	if d.Name == "" {
 		sb.WriteString("@startuml\n")
@@ -183,7 +197,10 @@ func (d *Diagram) String() string {
 	}
 
 	// Regular edges
-	for _, edge := range d.Edges {
+	for i, edge := range d.Edges {
+		if comment := before(i); comment != "" {
+			sb.WriteString(fmt.Sprintf("' %s\n", comment))
+		}
 		sb.WriteString(fmt.Sprintf("%s --> %s : %s", edge.Src, edge.Dst, edge.Event))
 		// A lone "; x" is a guard (docs/SYNTAX.md), so an edge that only has a
 		// post must spell the omitted guard out as "; true ; x".

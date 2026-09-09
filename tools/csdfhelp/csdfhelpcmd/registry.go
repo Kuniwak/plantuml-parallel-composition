@@ -9,6 +9,7 @@ import (
 	"github.com/Kuniwak/puml-parallel/tools/csdfnorm/csdfnormcmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfparallel/csdfparallelcmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfparse/csdfparsecmd"
+	"github.com/Kuniwak/puml-parallel/tools/csdfpromote/csdfpromotecmd"
 	"github.com/Kuniwak/puml-parallel/tools/csdfrefinement/csdfrefinementcmd"
 	replcmd "github.com/Kuniwak/puml-parallel/tools/csdfrepl/csdfreplcmd"
 	clientcmd "github.com/Kuniwak/puml-parallel/tools/csdfreplcmd/csdfreplcmdcmd"
@@ -44,6 +45,11 @@ func Registry() []toolsdoc.Entry {
 			Name:    "csdfhide",
 			Summary: "Hides events of a Composable State Diagram following CSP hiding semantics.",
 			Run:     tools.NewCommandFunc(csdfhidecmd.NewParseOptionsFunc(), csdfhidecmd.NewMainFunc()),
+		},
+		{
+			Name:    "csdfpromote",
+			Summary: "Expands the promotion directives of a global Composable State Diagram into plain PlantUML.",
+			Run:     tools.NewCommandFunc(csdfpromotecmd.NewParseOptionsFunc(), csdfpromotecmd.NewMainFunc()),
 		},
 		{
 			Name:    "csdfcomp",

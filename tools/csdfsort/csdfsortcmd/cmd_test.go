@@ -90,3 +90,20 @@ func TestNewMainFuncReportsParseErrors(t *testing.T) {
 		t.Error("want non-zero exit status, got 0")
 	}
 }
+
+// A global diagram's edges are not the whole of its behaviour, so every tool but
+// csdfpromote has to refuse one. The refusal comes from csdf.Parse, which every
+// tool goes through, and it says what the author is missing.
+func TestNewMainFuncRefusesAGlobalDiagram(t *testing.T) {
+	cmdFunc := tools.NewCommandFunc(NewParseOptionsFunc(), NewMainFunc())
+	spy := cli.SpyProcInout()
+
+	exitStatus := cmdFunc([]string{"../../../examples/promote/TRADES.puml"}, spy.New())
+
+	if exitStatus != 1 {
+		t.Fatalf("want 1, got %d", exitStatus)
+	}
+	if !strings.Contains(spy.Stderr.String(), "run csdfpromote on it first") {
+		t.Errorf("want the hint on stderr, got %q", spy.Stderr.String())
+	}
+}

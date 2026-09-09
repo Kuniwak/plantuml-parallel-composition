@@ -1,0 +1,44 @@
+name: PlantUML
+
+# The hand-written global diagrams spell their promotion directives in PlantUML's
+# own syntax, so that what an author writes is also what a reader looks at. Only
+# PlantUML can say whether a spelling still renders. This is a workflow of its own
+# because it installs a JRE and Graphviz, and the Go tests must stay fast.
+on:
+  push:
+    branches: master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  render:
+    name: Render
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    env:
+      # Without this a runner that lost PlantUML would skip the check and report
+      # a pass.
+      CSDF_REQUIRE_PLANTUML: '1'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install PlantUML
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends plantuml graphviz
+
+      - name: Render the global diagrams
+        run: go test -v ./csdf/promote/rendercheck/

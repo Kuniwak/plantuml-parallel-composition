@@ -141,3 +141,59 @@ Semantics
 | `block_comment`                            | N/A                | PlantUML block comment delimited by `/'` and `'/`. It is not retained in the AST.                                                                                         |
 | `unicode_char_except_dquote_and_backslash` | `rune`             | Represents Unicode characters except double quotes and backslashes.                                                                                                      |
 | `unicode_char_except_semicolon`            | `rune`             | Represents Unicode characters except semicolons.                                                                                                                         |
+
+
+Global Diagram Format
+---------------------
+The grammar above is what every tool reads. `csdfpromote` reads an upper-compatible
+one on top of it, in which a diagram may also declare a promotion. The directives
+are spelled in PlantUML's own syntax, so that a hand-written global diagram still
+renders; `csdfpromote` lifts them out and prints a diagram of the grammar above.
+Refer to PROMOTION.md for what they mean.
+
+```abnf
+globalDiagram   = "@startuml" inlineTrivia 0*1(diagramName) LF trivia
+                  *((stateDecl / compositeState / preprocessorLine / noteBlock) trivia)
+                  startEdgeDecl trivia
+                  *((edgeDecl / noteBlock / preprocessorLine) trivia)
+                  0*1(endEdgeDecl trivia)
+                  "@enduml" LF
+
+compositeState  = "state" inlineSeparator stateName inlineSeparator "as" inlineSeparator stateID
+                  inlineTrivia "{" LF trivia
+                  *((stateVarDecl / promoteBlock / preprocessorLine) trivia)
+                  "}" LF
+
+promoteBlock    = "state" inlineSeparator promoteTitle inlineSeparator "as" inlineSeparator stateID
+                  inlineSeparator "<<promote>>"
+                  0*1(inlineTrivia "{" LF trivia includeLine trivia "}") inlineTrivia LF
+promoteTitle    = DQUOTE var inlineTrivia ":" inlineTrivia param inlineTrivia ("⇸" / "->>") inlineTrivia typeName DQUOTE
+includeLine     = "!include" inlineSeparator path inlineTrivia LF
+
+noteBlock       = "note" inlineSeparator ("as" inlineSeparator noteID / noteAnchor) inlineTrivia LF
+                  *(noteLine LF)
+                  inlineTrivia "end" inlineSeparator "note" inlineTrivia LF
+noteAnchor      = ("left" / "right" / "top" / "bottom") inlineSeparator "of" inlineSeparator stateID
+noteLine        = *unicode_char_except_LF
+noteID          = id
+
+syncBody        = "sync" inlineSeparator eventName inlineTrivia ":" inlineTrivia mapRef *(inlineTrivia "," inlineTrivia mapRef)
+constrainBody   = "constrain" inlineSeparator eventName inlineTrivia "(" inlineTrivia param *(inlineTrivia "," inlineTrivia param) inlineTrivia ")" inlineTrivia ";" inlineTrivia guard
+mapRef          = var inlineTrivia "(" inlineTrivia param inlineTrivia ")"
+
+preprocessorLine = "!" *unicode_char_except_LF LF
+path            = 1*(unicode_char_except_space) / DQUOTE 1*(unicode_char_except_dquote) DQUOTE
+typeName        = 1*(unicode_char_except_space)
+param           = 1*(unicode_char_except_comma_paren)
+eventName       = 1*(unicode_char_except_paren_semicolon_colon)
+```
+
+| Syntax Element     | Corresponding Type | Meaning                                                                                                                                                                                 |
+|:-------------------|:-------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `globalDiagram`    | `GlobalDiagram`    | A diagram together with the directives lifted out of it. What is left is a `Diagram` of the grammar above, with the composite states flattened into ordinary ones.                        |
+| `compositeState`   | `State`            | An ordinary state whose braces hold its state variables and the `<<promote>>` blocks of the families that move in it. Nesting anything else is an error.                                   |
+| `promoteBlock`     | `Promote`          | One family of instances. The title names the map, the parameter the instance ID is written as, and the type of one instance; the alias is a PlantUML identifier and carries no meaning. A block with no body only says that the family moves in that state too. |
+| `includeLine`      | `string`           | The local diagram of the family. Exactly one block per map carries it.                                                                                                                    |
+| `noteBlock`        | `Sync`/`Constrain` | A directive when its first non-empty line starts with `sync` or `constrain`; a note for the reader otherwise, and then discarded.                                                          |
+| `noteAnchor`       | `Anchor`           | The block the note points at, which is drawn as a line. A floating `note as <id>` points at nothing: PlantUML's state diagrams have no `<id> .. <state>` link.                              |
+| `preprocessorLine` | N/A                | A PlantUML preprocessor line such as `!define` or `!ifndef`. It is discarded, and it is how a local diagram hides its PlantUML-only lines when it is included.                              |

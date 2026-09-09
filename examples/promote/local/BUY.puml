@@ -1,0 +1,19 @@
+@startuml BUY
+' CSDF-IGNORE-BEGIN
+!ifndef PROMOTED
+title 買い約定 1 件のライフサイクル
+!endif
+' CSDF-IGNORE-END
+
+state "なし" as buyNone
+state "約定済み" as buyBooked
+buyBooked : qty ; 数量
+state "記帳済み" as buyPosted
+buyPosted : qty ; 数量
+
+[*] --> buyNone
+
+buyNone --> buyBooked : BUY(数量) ; true ; qty は 数量
+buyBooked --> buyPosted : BOOK(数量)
+buyPosted --> buyNone : SETTLE
+@enduml

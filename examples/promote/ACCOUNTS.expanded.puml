@@ -1,0 +1,13 @@
+@startuml ACCOUNTS
+state "稼働中" as running
+running: accounts ; 口座ID ⇸ Account
+[*] --> running : accounts は空
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈未開設〉
+running --> running : CLOSE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ∧ balance が 0 ; accounts' = {口座ID} ⩤ accounts
+' promote: local/ACCOUNT.puml 〈開設済み〉 → 〈凍結中〉
+running --> running : FREEZE(口座ID, 理由) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈開設済み〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈凍結中〉} ∧ reason は 理由
+' promote: local/ACCOUNT.puml 〈未開設〉 → 〈開設済み〉
+running --> running : OPEN(口座ID) ; 口座ID ∉ dom accounts ; accounts' = accounts ∪ {口座ID ↦ 〈開設済み〉} ∧ balance は 0
+' promote: local/ACCOUNT.puml 〈凍結中〉 → 〈開設済み〉
+running --> running : UNFREEZE(口座ID) ; 口座ID ∈ dom accounts ∧ accounts(口座ID) ∈ 〈凍結中〉 ; accounts' = accounts ⊕ {口座ID ↦ 〈開設済み〉}
+@enduml

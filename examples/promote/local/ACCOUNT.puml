@@ -1,0 +1,24 @@
+@startuml ACCOUNT
+' The start state means that no such account exists: leaving it opens an
+' account and entering it closes one. The state IDs carry an "acc" prefix
+' because !include drops every local diagram into one namespace.
+' CSDF-IGNORE-BEGIN
+!ifndef PROMOTED
+title 口座 1 件のライフサイクル
+!endif
+' CSDF-IGNORE-END
+
+state "未開設" as accNone
+state "開設済み" as accOpen
+accOpen : balance ; 残高
+state "凍結中" as accFrozen
+accFrozen : balance ; 残高
+accFrozen : reason ; 凍結理由
+
+[*] --> accNone
+
+accNone --> accOpen : OPEN ; true ; balance は 0
+accOpen --> accFrozen : FREEZE(理由) ; true ; reason は 理由
+accFrozen --> accOpen : UNFREEZE
+accOpen --> accNone : CLOSE ; balance が 0
+@enduml

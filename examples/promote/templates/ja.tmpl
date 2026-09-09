@@ -1,0 +1,13 @@
+{{/*
+  The Japanese wording of the generated clauses. Pass it with -template.
+  Every clause is a named template; the ones left out keep their symbolic
+  default. "and" is what the clauses of one predicate are joined with.
+*/}}
+{{define "inDom"}}{{.ID}} は {{.Map}} にある{{end}}
+{{define "notInDom"}}{{.ID}} は {{.Map}} にない{{end}}
+{{define "atState"}}{{.Map}} の {{.ID}} は〈{{.Src}}〉{{end}}
+{{define "update"}}{{.Map}} の {{.ID}} を〈{{.Dst}}〉にする{{end}}
+{{define "create"}}{{.Map}} に {{.ID}} を〈{{.Dst}}〉として加える{{end}}
+{{define "delete"}}{{.Map}} から {{.ID}} を除く{{end}}
+{{define "frame"}}{{.Var}} は変わらない{{end}}
+{{define "and"}}、{{end}}

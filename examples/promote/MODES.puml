@@ -1,0 +1,41 @@
+@startuml MODES
+' Two maps and two operating modes. accounts is driven in both, audits only
+' while running: the <<promote>> block is what says where a family moves, so
+' audits is frozen in 縮退中. The mode-switching edges and their frames are
+' hand-written - promotion says nothing about them.
+'
+' A map is named by the title of its block, not by its PlantUML alias, because
+' the alias has to be unique across the diagram. Only one block per map carries
+' the !include: a second copy of the same file would collide with the first on
+' every state ID and PlantUML would merge the two boxes into one. The other
+' parents hold a bodyless block that names the map and nothing else.
+!define PROMOTED
+
+state "稼働中" as running {
+  running : accounts ; 口座ID ⇸ Account
+  running : audits ; 監査ID ⇸ Audit
+
+  state "accounts : 口座ID ⇸ Account" as runningAccounts <<promote>> {
+    !include local/ACCOUNT.puml
+  }
+  state "audits : 監査ID ⇸ Audit" as runningAudits <<promote>> {
+    !include local/AUDIT.puml
+  }
+}
+
+state "縮退中" as degraded {
+  degraded : accounts ; 口座ID ⇸ Account
+  degraded : audits ; 監査ID ⇸ Audit
+
+  state "accounts : 口座ID ⇸ Account" as degradedAccounts <<promote>>
+}
+
+[*] --> running : accounts と audits は空
+
+running --> degraded : DEGRADE ; true ; accounts' = accounts ∧ audits' = audits
+degraded --> running : RECOVER ; true ; accounts' = accounts ∧ audits' = audits
+
+note bottom of runningAudits
+  constrain AUDIT-BEGIN(監査ID, 口座ID) ; 口座ID は accounts の定義域にある
+end note
+@enduml
